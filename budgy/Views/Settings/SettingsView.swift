@@ -274,7 +274,12 @@ struct BankConnectionsView: View {
             let session = try await service.createLink(investments: investments)
             guard let url = URL(string: session.hosted_link_url) else { throw PlaidService.ServiceError.server("Plaid didn't return a link URL.") }
             // Plaid's Hosted Link runs in a secure system browser sheet and redirects to budgy:// when done.
-            _ = try await webAuthenticationSession.authenticate(using: url, callbackURLScheme: "budgy")
+            // If you close the sheet yourself, the bank may still have been linked, so check either way.
+            do {
+                _ = try await webAuthenticationSession.authenticate(using: url, callbackURLScheme: "budgy")
+            } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+                // Fall through and ask Plaid whether the session finished.
+            }
             status = "Finishing up…"
             let linked = try await service.completeLink(session)
             if linked.isEmpty {
@@ -283,8 +288,6 @@ struct BankConnectionsView: View {
             }
             await sync.registerLinkedItems(linked, context: context)
             status = "✅ Connected \(linked.map(\.institution_name).joined(separator: ", "))."
-        } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
-            status = nil
         } catch {
             status = "❌ \(error.localizedDescription)"
         }

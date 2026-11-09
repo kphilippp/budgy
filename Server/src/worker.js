@@ -85,7 +85,8 @@ async function createLink(env, { kind }) {
     user: { client_user_id: "budgy-owner" },
     products: isInvestments ? ["investments"] : ["transactions"],
     transactions: isInvestments ? undefined : { days_requested: 365 },
-    hosted_link: { completion_redirect_uri: REDIRECT_URI, is_mobile_app: true },
+    // Plaid hosts the page (and any bank OAuth redirects) itself; it sends us back to the app when done.
+    hosted_link: { completion_redirect_uri: REDIRECT_URI },
   });
   return { link_token: data.link_token, hosted_link_url: data.hosted_link_url, is_investments: isInvestments };
 }

@@ -8,5 +8,5 @@ PLAID_ENV = "sandbox"
 
 [[kv_namespaces]]
 binding = "ITEMS"
-# Replace with the id printed by: npx wrangler kv namespace create ITEMS
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+# KV namespace "budgy_items"
+id = "406b620f779b40baa8671ac000f6c803"

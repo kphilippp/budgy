@@ -1,0 +1,12 @@
+name = "budgy-relay"
+main = "src/worker.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+# Switch to "production" once Plaid approves your production access.
+PLAID_ENV = "sandbox"
+
+[[kv_namespaces]]
+binding = "ITEMS"
+# Replace with the id printed by: npx wrangler kv namespace create ITEMS
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"

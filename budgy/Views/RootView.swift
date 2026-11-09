@@ -1,0 +1,149 @@
+import SwiftUI
+import SwiftData
+
+/// Light/dark preference. Dark is the default.
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case dark, light, system
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .dark: "Dark"
+        case .light: "Light"
+        case .system: "System"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .dark: .dark
+        case .light: .light
+        case .system: nil
+        }
+    }
+}
+
+enum AppTab: Hashable {
+    case home, budget, sort, goals, accounts
+}
+
+/// Lets any screen switch tabs (e.g. Home's "to sort" badge opens the Sort tab).
+@Observable
+final class AppNavigation {
+    var selectedTab: AppTab = .home
+}
+
+struct RootView: View {
+    @Environment(BiometricLock.self) private var lock
+    @AppStorage(SettingsKeys.appearance) private var appearance: AppAppearance = .dark
+    @AppStorage(SettingsKeys.themeColor) private var theme: AppTheme = .teal
+    @Query(filter: #Predicate<Transaction> { $0.needsCategoryReview }) private var unsorted: [Transaction]
+    @State private var navigation = AppNavigation()
+
+    var body: some View {
+        ZStack {
+            TabView(selection: $navigation.selectedTab) {
+                Tab("Home", systemImage: "house.fill", value: .home) {
+                    HomeView()
+                }
+                Tab("Budget", systemImage: "chart.bar.doc.horizontal.fill", value: .budget) {
+                    BudgetView()
+                }
+                Tab("Sort", systemImage: "rectangle.stack.fill", value: .sort) {
+                    SortView()
+                }
+                .badge(unsorted.count)
+                Tab("Goals", systemImage: "target", value: .goals) {
+                    GoalsView()
+                }
+                Tab("Accounts", systemImage: "building.columns.fill", value: AppTab.accounts) {
+                    AccountsView()
+                }
+            }
+            .tabBarMinimizeBehavior(.onScrollDown)
+            .environment(navigation)
+
+            if lock.isEnabled && !lock.isUnlocked {
+                LockScreen()
+                    .transition(.opacity)
+            }
+        }
+        .animation(.smooth, value: lock.isUnlocked)
+        .tint(theme.color)
+        .environment(\.themeColor, theme.color)
+        .preferredColorScheme(appearance.colorScheme)
+    }
+}
+
+/// Covers the app until Face ID succeeds.
+private struct LockScreen: View {
+    @Environment(BiometricLock.self) private var lock
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(.tint)
+            Text("Budgy is locked")
+                .font(.title2.weight(.semibold))
+            Button("Unlock with Face ID") {
+                Task { await lock.unlock() }
+            }
+            .buttonStyle(.glassProminent)
+            .controlSize(.large)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.ultraThinMaterial)
+    }
+}
+
+/// Adds the Advisor (sparkles) and Settings buttons to a screen's navigation bar.
+struct BudgyToolbar: ViewModifier {
+    @State private var showAdvisor = false
+    @State private var showSettings = false
+
+    func body(content: Content) -> some View {
+        content
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Ask Budgy", systemImage: "sparkles") { showAdvisor = true }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Settings", systemImage: "gearshape") { showSettings = true }
+                }
+            }
+            .sheet(isPresented: $showAdvisor) {
+                AdvisorView()
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+            }
+    }
+}
+
+extension View {
+    func budgyToolbar() -> some View { modifier(BudgyToolbar()) }
+}
+
+/// Builds a `FinanceEngine` from live queries so screens update automatically.
+struct EngineReader<Content: View>: View {
+    @Query private var accounts: [Account]
+    @Query private var transactions: [Transaction]
+    @Query(sort: \Category.sortOrder) private var categories: [Category]
+    @Query private var recurring: [RecurringItem]
+    @Query(sort: \Goal.sortOrder) private var goals: [Goal]
+    @Query private var schedules: [PaySchedule]
+
+    private let content: (FinanceEngine) -> Content
+
+    init(@ViewBuilder content: @escaping (FinanceEngine) -> Content) {
+        self.content = content
+    }
+
+    var body: some View {
+        content(FinanceEngine(
+            accounts: accounts, transactions: transactions, categories: categories,
+            recurring: recurring, goals: goals, schedule: schedules.first
+        ))
+    }
+}

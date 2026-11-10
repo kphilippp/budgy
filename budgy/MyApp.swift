@@ -5,6 +5,7 @@ import SwiftData
     @Environment(\.scenePhase) private var scenePhase
     @State private var sync = SyncService()
     @State private var lock = BiometricLock()
+    @State private var accounts = AccountStore()
 
     let container: ModelContainer
 
@@ -21,9 +22,9 @@ import SwiftData
             RootView()
                 .environment(sync)
                 .environment(lock)
+                .environment(accounts)
                 .task {
                     let context = container.mainContext
-                    SampleData.seedIfNeeded(context: context)
                     SampleData.ensureDefaultCategories(context: context)
                     await lock.unlock()
                     await sync.sync(context: context)

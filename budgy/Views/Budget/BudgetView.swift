@@ -2,14 +2,7 @@ import SwiftUI
 import SwiftData
 import Charts
 
-enum BudgetMode: String, CaseIterable, Identifiable {
-    case paycheck = "Per Paycheck"
-    case monthly = "Monthly"
-    var id: String { rawValue }
-}
-
 struct BudgetView: View {
-    @State private var mode: BudgetMode = .paycheck
     @State private var offset = 0
     @State private var editingCategory: Category?
     @State private var showNewCategory = false
@@ -17,25 +10,19 @@ struct BudgetView: View {
     var body: some View {
         NavigationStack {
             EngineReader { engine in
-                let breakdown = mode == .paycheck ? engine.paycheckBreakdown(offset: offset) : engine.monthlyBreakdown(offset: offset)
+                let breakdown = engine.budgetMonthBreakdown(offset: offset)
                 ScrollView {
                     VStack(spacing: 16) {
-                        Picker("View", selection: $mode) {
-                            ForEach(BudgetMode.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                        .onChange(of: mode) { offset = 0 }
+                        PeriodNavigator(period: breakdown.period, offset: $offset)
 
-                        PeriodNavigator(period: breakdown.period, mode: mode, offset: $offset)
-
-                        if mode == .monthly && breakdown.paydayCount >= 3 {
-                            Label("3-paycheck month! Your extra check is a bonus. Consider sending it to a goal.", systemImage: "gift.fill")
+                        if breakdown.paydayCount > engine.paychecksPerMonth {
+                            Label("Extra paycheck this month! It isn't in your budget, so it's bonus money for a goal.", systemImage: "gift.fill")
                                 .font(.subheadline.weight(.medium))
                                 .foregroundStyle(.green)
                                 .card(padding: 14)
                         }
 
-                        BudgetSummaryCard(breakdown: breakdown, base: engine.basePaycheck)
+                        BudgetSummaryCard(breakdown: breakdown, base: engine.basePaycheck, paychecks: engine.paychecksPerMonth, isOverridden: (engine.schedule?.monthlyIncomeOverride ?? 0) > 0)
                         WaterfallChart(breakdown: breakdown)
 
                         LineSection(title: "Pay Yourself First", lines: breakdown.payYourselfFirst, color: .green)
@@ -102,17 +89,11 @@ struct BudgetView: View {
 
 private struct PeriodNavigator: View {
     var period: PayPeriod
-    var mode: BudgetMode
     @Binding var offset: Int
 
     private var title: String {
-        switch mode {
-        case .monthly:
-            return period.start.formatted(.dateTime.month(.wide).year())
-        case .paycheck:
-            let end = Calendar.current.date(byAdding: .day, value: -1, to: period.end) ?? period.end
-            return "\(period.start.formatted(.dateTime.month(.abbreviated).day())) – \(end.formatted(.dateTime.month(.abbreviated).day()))"
-        }
+        let end = Calendar.current.date(byAdding: .day, value: -1, to: period.end) ?? period.end
+        return "\(period.start.formatted(.dateTime.month(.abbreviated).day())) – \(end.formatted(.dateTime.month(.abbreviated).day()))"
     }
 
     var body: some View {
@@ -122,7 +103,7 @@ private struct PeriodNavigator: View {
             Spacer()
             VStack(spacing: 2) {
                 Text(title).font(.headline)
-                Text(offset == 0 ? (mode == .paycheck ? "This paycheck" : "This month") : (offset < 0 ? "Past" : "Upcoming"))
+                Text(offset == 0 ? "This budget month" : (offset < 0 ? "Past" : "Upcoming"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -138,17 +119,21 @@ private struct PeriodNavigator: View {
 private struct BudgetSummaryCard: View {
     var breakdown: BudgetBreakdown
     var base: Double
+    var paychecks: Int
+    var isOverridden: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(breakdown.actualIncome > 0 ? "Income received" : "Expected income")
+                    Text("Monthly income")
                         .font(.subheadline).foregroundStyle(.secondary)
                     Text(breakdown.income.currencyWhole)
                         .font(.system(.title, design: .rounded).weight(.bold))
-                    if breakdown.paydayCount > 0 {
-                        Text("Base paycheck \(base.currencyWhole) × \(breakdown.paydayCount)")
+                    Text(isOverridden ? "Set in Settings" : "Base paycheck \(base.currencyWhole) × \(paychecks)")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if breakdown.actualIncome > 0 {
+                        Text("Received so far: \(breakdown.actualIncome.currencyWhole)")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -347,7 +332,7 @@ struct CategoryEditor: View {
     init(category: Category?) {
         self.category = category
         self.name = category?.name ?? ""
-        self.budget = category?.budgetPerPaycheck ?? 50
+        self.budget = category?.monthlyBudget ?? 50
         self.systemImage = category?.systemImage ?? "tag.fill"
         self.colorName = category?.colorName ?? "blue"
     }
@@ -362,7 +347,7 @@ struct CategoryEditor: View {
                     }
                 }
                 Section {
-                    LabeledContent("Per paycheck") {
+                    LabeledContent("Per month") {
                         TextField("Amount", value: $budget, format: .currency(code: "USD"))
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
@@ -370,7 +355,7 @@ struct CategoryEditor: View {
                 } header: {
                     Text("Budget")
                 } footer: {
-                    Text("About \((budget * 26 / 12).currencyWhole) per month on a biweekly schedule.")
+                    Text("About \((budget / 30).currencyWhole) a day over a budget month.")
                 }
                 Section("Icon") {
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
@@ -405,12 +390,12 @@ struct CategoryEditor: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save", systemImage: "checkmark") {
                         let target = category ?? {
-                            let new = Category(name: name, systemImage: systemImage, colorName: colorName, budgetPerPaycheck: budget, sortOrder: categories.count)
+                            let new = Category(name: name, systemImage: systemImage, colorName: colorName, monthlyBudget: budget, sortOrder: categories.count)
                             context.insert(new)
                             return new
                         }()
                         target.name = name
-                        target.budgetPerPaycheck = budget
+                        target.monthlyBudget = budget
                         target.systemImage = systemImage
                         target.colorName = colorName
                         try? context.save()

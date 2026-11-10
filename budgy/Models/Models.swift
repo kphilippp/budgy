@@ -106,8 +106,9 @@ final class Category {
     var name: String = ""
     var systemImage: String = "tag.fill"
     var colorName: String = "blue"
-    /// How much you plan to spend in this category each paycheck.
-    var budgetPerPaycheck: Double = 0
+    /// How much you plan to spend in this group each budget month.
+    /// (Stored under its old per-paycheck name so existing data carries over.)
+    @Attribute(originalName: "budgetPerPaycheck") var monthlyBudget: Double = 0
     var sortOrder: Int = 0
     var isSample: Bool = false
     /// Marks built-in groups that recurring charges flow into ("subscriptions", "bills"), even if renamed.
@@ -116,11 +117,11 @@ final class Category {
     @Relationship(deleteRule: .nullify, inverse: \Transaction.category)
     var transactions: [Transaction]? = []
 
-    init(name: String, systemImage: String, colorName: String, budgetPerPaycheck: Double, sortOrder: Int = 0, isSample: Bool = false) {
+    init(name: String, systemImage: String, colorName: String, monthlyBudget: Double, sortOrder: Int = 0, isSample: Bool = false) {
         self.name = name
         self.systemImage = systemImage
         self.colorName = colorName
-        self.budgetPerPaycheck = budgetPerPaycheck
+        self.monthlyBudget = monthlyBudget
         self.sortOrder = sortOrder
         self.isSample = isSample
     }
@@ -238,8 +239,8 @@ final class RecurringItem {
     }
 
     /// All due dates in `[start, end)`, walking from `nextDueDate`.
-    func dueDates(from start: Date, to end: Date, calendar: Calendar = .current) -> [Date] {
-        guard isActive, !needsReview, end > start else { return [] }
+    func dueDates(from start: Date, to end: Date, includingUnreviewed: Bool = false, calendar: Calendar = .current) -> [Date] {
+        guard isActive, includingUnreviewed || !needsReview, end > start else { return [] }
         let startDay = calendar.startOfDay(for: start)
         var dates: [Date] = []
         var cursor = calendar.startOfDay(for: nextDueDate)
@@ -351,6 +352,10 @@ final class PaySchedule {
     /// Lowercased text that identifies paycheck deposits, e.g. "acme payroll".
     var matchText: String = ""
     var isSample: Bool = false
+    /// Day of the month your budget month starts (the day you pay your card off). 0 = detect automatically.
+    var budgetCycleDay: Int = 0
+    /// If set (> 0), use this as monthly income instead of the amount estimated from paychecks.
+    var monthlyIncomeOverride: Double = 0
 
     var frequency: Frequency {
         get { Frequency(rawValue: frequencyRaw) ?? .biweekly }

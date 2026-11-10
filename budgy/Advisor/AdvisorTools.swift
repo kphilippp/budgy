@@ -11,8 +11,12 @@ nonisolated struct FinanceContext: Sendable {
     struct BudgetInfo: Sendable { var category: String; var budget: Double; var spent: Double }
 
     var today: Date
+    /// What's left to spend this budget month (card payoff day to card payoff day).
     var safeToSpendUntilPayday: Double
     var nextPayday: Date
+    var budgetMonthEnd: Date
+    var perDay: Double
+    var monthlyIncome: Double
     var basePaycheck: Double
     var payFrequency: String
     var netWorth: Double
@@ -36,8 +40,10 @@ nonisolated struct FinanceContext: Sendable {
     /// A short summary included directly in the instructions so the model always has the basics.
     var briefing: String {
         """
-        Today is \(dateString(today)). Safe to Spend until next payday (\(dateString(nextPayday))): \(money(safeToSpendUntilPayday)). \
-        Base paycheck: \(money(basePaycheck)) \(payFrequency). Checking: \(money(checking)). Credit card owed: \(money(creditCardOwed)). \
+        Today is \(dateString(today)). Budgets run monthly from the day the credit card is paid off. \
+        Safe to Spend for the rest of this budget month (until \(dateString(budgetMonthEnd))): \(money(safeToSpendUntilPayday)), about \(money(perDay)) per day. \
+        Monthly income: \(money(monthlyIncome)) (base paycheck \(money(basePaycheck)) \(payFrequency)). Next payday: \(dateString(nextPayday)). \
+        Checking: \(money(checking)). Credit card owed: \(money(creditCardOwed)). \
         Net worth: \(money(netWorth)). Subscriptions: \(money(monthlySubscriptions))/month.
         """
     }
@@ -49,7 +55,8 @@ extension FinanceEngine {
         let today = calendar.startOfDay(for: now)
         func day(_ offset: Int) -> Date { calendar.date(byAdding: .day, value: offset, to: today) ?? today }
 
-        let thisPaycheck = paycheckBreakdown()
+        let thisMonth = budgetMonthBreakdown()
+        let monthly = monthlySpend()
         let periods: [(String, Date, Date)] = [
             ("thisPaycheck", currentPeriod.start, day(1)),
             ("lastPaycheck", payCycle.period(offset: -1, from: now).start, currentPeriod.start),
@@ -64,8 +71,11 @@ extension FinanceEngine {
 
         return FinanceContext(
             today: today,
-            safeToSpendUntilPayday: safeToSpend().amount,
+            safeToSpendUntilPayday: monthly.left,
             nextPayday: nextPayday,
+            budgetMonthEnd: monthly.period.end,
+            perDay: monthly.perDay,
+            monthlyIncome: monthlyIncome,
             basePaycheck: basePaycheck,
             payFrequency: (schedule?.frequency ?? .biweekly).displayName.lowercased(),
             netWorth: netWorth,
@@ -81,7 +91,7 @@ extension FinanceEngine {
                       nextDate: $0.nextDueDate, priceIncreasedFrom: $0.hasPriceIncrease ? $0.previousAmount : nil)
             },
             spendingByPeriod: spending,
-            budgetThisPaycheck: thisPaycheck.categories.map { .init(category: $0.name, budget: $0.planned, spent: $0.actual) },
+            budgetThisPaycheck: thisMonth.categories.map { .init(category: $0.name, budget: $0.planned, spent: $0.actual) },
             safeToSpendByDay: (0...90).map { safeToSpend(until: day(max($0, 1))).amount },
             rothYTD: rothContributionsThisYear,
             rothProjected: rothProjectedThisYear,

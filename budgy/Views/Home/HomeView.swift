@@ -2,22 +2,11 @@ import SwiftUI
 import SwiftData
 import Charts
 
-/// What period Safe to Spend covers.
-enum SpendHorizon: String, CaseIterable, Identifiable {
-    case payday = "Paycheck"
-    case month = "Month"
-    case custom = "Pick Date"
-
-    var id: String { rawValue }
-}
-
 struct HomeView: View {
     @Environment(\.modelContext) private var context
     @Environment(SyncService.self) private var sync
     @Query(filter: #Predicate<Account> { $0.isSample }) private var sampleAccounts: [Account]
 
-    @State private var horizon: SpendHorizon = .payday
-    @State private var customDate = Calendar.current.date(byAdding: .day, value: 21, to: .now) ?? .now
     @State private var showBreakdown = false
     @State private var showAddTransaction = false
     @State private var showSubscriptions = false
@@ -25,27 +14,19 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             EngineReader { engine in
-                let until = untilDate(engine)
-                let windowStart = windowStart(engine)
-                let result = engine.safeToSpend(until: until)
-                let groups = engine.groupSpending(since: windowStart, until: until)
+                let monthly = engine.monthlySpend()
+                let groups = engine.groupSpending(since: monthly.period.start, until: monthly.period.end)
                 ScrollView {
                     VStack(spacing: 16) {
                         if !sampleAccounts.isEmpty {
                             SampleDataBanner()
                         }
 
-                        SafeToSpendCard(
-                            result: result,
-                            spent: engine.discretionarySpent(since: windowStart),
-                            groups: groups,
-                            horizon: $horizon,
-                            customDate: $customDate
-                        ) {
+                        SafeToSpendCard(monthly: monthly, groups: groups) {
                             showBreakdown = true
                         }
                         .sheet(isPresented: $showBreakdown) {
-                            SafeToSpendBreakdownView(result: result)
+                            SafeToSpendBreakdownView(monthly: monthly)
                         }
 
                         ForEach(engine.unassignedExtraPay, id: \.transaction.id) { item in
@@ -56,7 +37,7 @@ struct HomeView: View {
                             FundGoalsCard(goals: engine.unfundedGoalsThisPeriod, periodStart: engine.currentPeriod.start)
                         }
 
-                        SpendingGroupsSection(groups: groups, windowStart: windowStart, unsortedCount: engine.unsortedTransactions.count)
+                        SpendingGroupsSection(groups: groups, windowStart: monthly.period.start, unsortedCount: engine.unsortedTransactions.count)
 
                         InvestmentGroupsSection(engine: engine)
 
@@ -86,48 +67,26 @@ struct HomeView: View {
             }
         }
     }
-
-    private func untilDate(_ engine: FinanceEngine) -> Date {
-        switch horizon {
-        case .payday:
-            return engine.nextPayday
-        case .month:
-            return Calendar.current.dateInterval(of: .month, for: .now)?.end ?? engine.nextPayday
-        case .custom:
-            return max(customDate, Calendar.current.date(byAdding: .day, value: 1, to: .now) ?? .now)
-        }
-    }
-
-    /// Spending is counted from the start of this paycheck (or the 1st, for Month End).
-    private func windowStart(_ engine: FinanceEngine) -> Date {
-        if horizon == .month {
-            return Calendar.current.dateInterval(of: .month, for: .now)?.start ?? engine.currentPeriod.start
-        }
-        return engine.currentPeriod.start
-    }
 }
 
 // MARK: - Safe to Spend
 
+/// This budget month's Safe to Spend: monthly income minus fixed costs and what you've spent so far.
 struct SafeToSpendCard: View {
-    var result: SafeToSpendResult
-    /// Everyday spending so far in this window.
-    var spent: Double
+    var monthly: MonthlySpendResult
     var groups: [FinanceEngine.GroupSpend]
-    @Binding var horizon: SpendHorizon
-    @Binding var customDate: Date
     var onShowBreakdown: () -> Void
 
-    private var isNegative: Bool { result.amount < 0 }
-    private var left: Double { max(result.amount, 0) }
+    private var isNegative: Bool { monthly.left < 0 }
+    private var left: Double { max(monthly.left, 0) }
+
+    private var periodText: String {
+        let end = Calendar.current.date(byAdding: .day, value: -1, to: monthly.period.end) ?? monthly.period.end
+        return "\(monthly.period.start.formatted(.dateTime.month(.abbreviated).day())) – \(end.formatted(.dateTime.month(.abbreviated).day())) · \(monthly.daysRemaining) \(monthly.daysRemaining == 1 ? "day" : "days") left"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Picker("Period", selection: $horizon) {
-                ForEach(SpendHorizon.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
@@ -142,35 +101,29 @@ struct SafeToSpendCard: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("How Safe to Spend is calculated")
                     }
-                    Text(result.amount.currencyWhole)
+                    Text(monthly.left.currencyWhole)
                         .font(.system(size: 50, weight: .bold, design: .rounded))
                         .foregroundStyle(isNegative ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
-                        .contentTransition(.numericText(value: result.amount))
+                        .contentTransition(.numericText(value: monthly.left))
                         .minimumScaleFactor(0.5)
                         .lineLimit(1)
-                    Text("until \(result.untilDate.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())) · \(result.daysRemaining) \(result.daysRemaining == 1 ? "day" : "days")")
+                    Text(periodText)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
-                SpendDonut(groups: groups, spent: spent, left: left)
+                SpendDonut(groups: groups, spent: monthly.spent, left: left)
                     .frame(width: 104, height: 104)
             }
 
-            if horizon == .custom {
-                DatePicker("Spend until", selection: $customDate, in: Date.now..., displayedComponents: .date)
-                    .font(.subheadline)
-            }
-
-            SpendBar(spent: spent, left: left, overBy: isNegative ? -result.amount : 0, dailyAllowance: result.dailyAllowance, days: result.daysRemaining)
+            SpendBar(spent: monthly.spent, left: left, overBy: isNegative ? -monthly.left : 0, dailyAllowance: monthly.perDay, days: monthly.daysRemaining)
         }
         .padding(20)
         .glassEffect(.regular, in: .rect(cornerRadius: 28))
-        .animation(.smooth, value: result.amount)
+        .animation(.smooth, value: monthly.left)
     }
 }
 
-/// Spent vs. left over, with the daily allowance.
 struct SpendBar: View {
     @Environment(\.themeColor) private var themeColor
     var spent: Double
@@ -286,32 +239,40 @@ struct SpendDonut: View {
 
 struct SafeToSpendBreakdownView: View {
     @Environment(\.dismiss) private var dismiss
-    var result: SafeToSpendResult
+    var monthly: MonthlySpendResult
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    row("Checking balance", result.cash, sign: "")
-                    if result.cardOwed > 0 { row("Credit card balance", -result.cardOwed, sign: "−") }
-                    if result.upcomingTotal > 0 { row("Bills, subscriptions & Roth before \(result.untilDate.formatted(.dateTime.month().day()))", -result.upcomingTotal, sign: "−") }
-                    if result.goalReserve > 0 { row("Goal contributions", -result.goalReserve, sign: "−") }
-                    if result.expectedIncome > 0 { row("Base pay from \(result.paydaysBeforeDate) payday\(result.paydaysBeforeDate == 1 ? "" : "s")", result.expectedIncome, sign: "+") }
+                    row(monthly.incomeIsEstimated ? "Monthly income (estimated)" : "Monthly income", monthly.income, sign: "")
+                    if monthly.bills > 0 { row("Bills", -monthly.bills, sign: "−") }
+                    if monthly.subscriptions > 0 { row("Subscriptions", -monthly.subscriptions, sign: "−") }
+                    if monthly.payYourselfFirst > 0 { row("Pay Yourself First (Roth)", -monthly.payYourselfFirst, sign: "−") }
+                    if monthly.goals > 0 { row("Goal contributions", -monthly.goals, sign: "−") }
+                    row("Spent so far", -monthly.spent, sign: "−")
+                } header: {
+                    Text(periodTitle)
                 } footer: {
-                    Text("Card purchases count as spent the moment you swipe, so Budgy sets aside your whole card balance. Future paychecks are counted at your base amount, never overtime.")
+                    Text("Your budget month starts the day you pay your credit card off. Budgy counts on your usual paychecks; an extra paycheck in a month is treated as bonus money. Change the start day or your monthly income in Settings → Paycheck.")
                 }
 
                 Section {
                     HStack {
                         Text("Safe to Spend").font(.headline)
                         Spacer()
-                        Text(result.amount.currency).font(.headline.monospacedDigit())
+                        Text(monthly.left.currency).font(.headline.monospacedDigit())
+                    }
+                    HStack {
+                        Text("Per day for \(monthly.daysRemaining) days")
+                        Spacer()
+                        Text(monthly.perDay.currency).monospacedDigit()
                     }
                 }
 
-                if !result.upcoming.isEmpty {
-                    Section("Set aside") {
-                        ForEach(result.upcoming) { charge in
+                if !monthly.scheduled.isEmpty {
+                    Section("Scheduled this month") {
+                        ForEach(monthly.scheduled) { charge in
                             HStack {
                                 IconBadge(systemImage: charge.systemImage, color: color(for: charge.source), size: 28)
                                 VStack(alignment: .leading) {
@@ -335,6 +296,11 @@ struct SafeToSpendBreakdownView: View {
         .presentationDetents([.medium, .large])
     }
 
+    private var periodTitle: String {
+        let end = Calendar.current.date(byAdding: .day, value: -1, to: monthly.period.end) ?? monthly.period.end
+        return "\(monthly.period.start.formatted(.dateTime.month(.abbreviated).day())) – \(end.formatted(.dateTime.month(.abbreviated).day()))"
+    }
+
     private func row(_ title: String, _ value: Double, sign: String) -> some View {
         HStack {
             Text(title)
@@ -355,6 +321,7 @@ struct SafeToSpendBreakdownView: View {
         }
     }
 }
+
 
 // MARK: - Cards
 

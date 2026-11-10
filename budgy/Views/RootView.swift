@@ -35,6 +35,7 @@ final class AppNavigation {
 
 struct RootView: View {
     @Environment(BiometricLock.self) private var lock
+    @Environment(AccountStore.self) private var accounts
     @AppStorage(SettingsKeys.appearance) private var appearance: AppAppearance = .dark
     @AppStorage(SettingsKeys.themeColor) private var theme: AppTheme = .teal
     @Query(filter: #Predicate<Transaction> { $0.needsCategoryReview }) private var unsorted: [Transaction]
@@ -42,6 +43,10 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
+            if !accounts.hasCompletedOnboarding {
+                OnboardingView()
+                    .transition(.opacity)
+            } else {
             TabView(selection: $navigation.selectedTab) {
                 Tab("Home", systemImage: "house.fill", value: .home) {
                     HomeView()
@@ -62,6 +67,7 @@ struct RootView: View {
             }
             .tabBarMinimizeBehavior(.onScrollDown)
             .environment(navigation)
+            }
 
             if lock.isEnabled && !lock.isUnlocked {
                 LockScreen()
@@ -69,6 +75,7 @@ struct RootView: View {
             }
         }
         .animation(.smooth, value: lock.isUnlocked)
+        .animation(.smooth, value: accounts.hasCompletedOnboarding)
         .tint(theme.color)
         .environment(\.themeColor, theme.color)
         .preferredColorScheme(appearance.colorScheme)

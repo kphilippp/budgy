@@ -37,27 +37,39 @@ enum SampleData {
         let existing = (try? context.fetch(FetchDescriptor<Category>())) ?? []
         guard existing.isEmpty else {
             upgradeGroups(context: context, existing: existing)
+            upgradeToMonthlyBudgets(context: context, existing: existing)
             return existing
         }
         let defaults: [(String, String, String, Double, String)] = [
-            ("Groceries", "cart.fill", "green", 180, ""),
-            ("Dining Out", "fork.knife", "orange", 120, ""),
-            ("Gas & Transportation", "car.fill", "blue", 90, ""),
-            ("Shopping", "bag.fill", "pink", 100, ""),
+            ("Groceries", "cart.fill", "green", 360, ""),
+            ("Dining Out", "fork.knife", "orange", 240, ""),
+            ("Gas & Transportation", "car.fill", "blue", 180, ""),
+            ("Shopping", "bag.fill", "pink", 200, ""),
             ("Subscriptions", "repeat.circle.fill", "purple", 0, CategoryRole.subscriptions),
             ("Bills & Utilities", "bolt.fill", "yellow", 0, CategoryRole.bills),
-            ("Entertainment", "sparkles", "indigo", 80, ""),
-            ("Health", "heart.fill", "red", 40, ""),
-            ("Other", "square.grid.2x2.fill", "teal", 40, "")
+            ("Entertainment", "sparkles", "indigo", 160, ""),
+            ("Health", "heart.fill", "red", 80, ""),
+            ("Other", "square.grid.2x2.fill", "teal", 80, "")
         ]
         let categories = defaults.enumerated().map { index, value in
-            let category = Category(name: value.0, systemImage: value.1, colorName: value.2, budgetPerPaycheck: value.3, sortOrder: index, isSample: isSample)
+            let category = Category(name: value.0, systemImage: value.1, colorName: value.2, monthlyBudget: value.3, sortOrder: index, isSample: isSample)
             category.systemRole = value.4
             return category
         }
         categories.forEach(context.insert)
         UserDefaults.standard.set(true, forKey: groupsUpgradedKey)
+        UserDefaults.standard.set(true, forKey: monthlyBudgetsKey)
         return categories
+    }
+
+    private static let monthlyBudgetsKey = "monthlyBudgetsV1"
+
+    /// Group budgets used to be per paycheck; budgets are now per budget month (about 2 paychecks).
+    private static func upgradeToMonthlyBudgets(context: ModelContext, existing: [Category]) {
+        guard !UserDefaults.standard.bool(forKey: monthlyBudgetsKey) else { return }
+        UserDefaults.standard.set(true, forKey: monthlyBudgetsKey)
+        existing.forEach { $0.monthlyBudget = ($0.monthlyBudget * 2).rounded() }
+        try? context.save()
     }
 
     private static let groupsUpgradedKey = "spendingGroupsV2"
@@ -75,13 +87,13 @@ enum SampleData {
         var all = existing
         let nextOrder = (existing.map(\.sortOrder).max() ?? 0) + 1
         if !existing.contains(where: { $0.systemRole == CategoryRole.subscriptions }) {
-            let group = Category(name: "Subscriptions", systemImage: "repeat.circle.fill", colorName: "purple", budgetPerPaycheck: 0, sortOrder: nextOrder)
+            let group = Category(name: "Subscriptions", systemImage: "repeat.circle.fill", colorName: "purple", monthlyBudget: 0, sortOrder: nextOrder)
             group.systemRole = CategoryRole.subscriptions
             context.insert(group)
             all.append(group)
         }
         if !existing.contains(where: { $0.systemRole == CategoryRole.bills }) {
-            let group = Category(name: "Bills & Utilities", systemImage: "bolt.fill", colorName: "yellow", budgetPerPaycheck: 0, sortOrder: nextOrder + 1)
+            let group = Category(name: "Bills & Utilities", systemImage: "bolt.fill", colorName: "yellow", monthlyBudget: 0, sortOrder: nextOrder + 1)
             group.systemRole = CategoryRole.bills
             context.insert(group)
             all.append(group)

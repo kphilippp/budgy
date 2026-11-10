@@ -58,8 +58,8 @@ struct BudgetBreakdown {
     var categories: [BudgetLine]
     var uncategorizedSpent: Double
 
-    /// Use money actually received once it arrives; until then, the base paycheck.
-    var income: Double { actualIncome > 0 ? actualIncome : expectedIncome }
+    /// Budget on your baseline monthly income; extra checks show up as extra pay instead.
+    var income: Double { expectedIncome > 0 ? expectedIncome : actualIncome }
 
     var payYourselfFirstTotal: Double { payYourselfFirst.reduce(0) { $0 + $1.planned } }
     var billsTotal: Double { bills.reduce(0) { $0 + $1.planned } }
@@ -188,18 +188,12 @@ struct FinanceEngine {
 
     // MARK: Budget breakdown
 
-    func paycheckBreakdown(offset: Int = 0) -> BudgetBreakdown {
-        let period = payCycle.period(offset: offset, from: now)
-        return breakdown(for: period, categoryFactor: 1)
+    /// Where a budget month's income goes (budget month = card payoff day to card payoff day).
+    func budgetMonthBreakdown(offset: Int = 0) -> BudgetBreakdown {
+        breakdown(for: budgetMonth(offset: offset), expectedIncome: monthlyIncome, goalPaychecks: Double(paychecksPerMonth))
     }
 
-    func monthlyBreakdown(offset: Int = 0) -> BudgetBreakdown {
-        let period = PayPeriod.month(containing: now, offset: offset, calendar: calendar)
-        let perYear = schedule?.frequency.occurrencesPerYear ?? 26
-        return breakdown(for: period, categoryFactor: perYear / 12)
-    }
-
-    private func breakdown(for period: PayPeriod, categoryFactor: Double) -> BudgetBreakdown {
+    private func breakdown(for period: PayPeriod, expectedIncome: Double, goalPaychecks: Double) -> BudgetBreakdown {
         let paydays = payCycle.paydays(from: period.start, to: period.end)
         let inPeriod = transactions.filter { period.contains($0.date) }
 
@@ -213,14 +207,14 @@ struct FinanceEngine {
         }
 
         let goalLines = goals.filter { !$0.isArchived && $0.contributionPerPaycheck > 0 }.map {
-            BudgetLine(name: $0.name, planned: $0.contributionPerPaycheck * Double(paydays.count), actual: 0, systemImage: $0.systemImage, colorName: $0.colorName)
+            BudgetLine(name: $0.name, planned: $0.contributionPerPaycheck * goalPaychecks, actual: 0, systemImage: $0.systemImage, colorName: $0.colorName)
         }
 
         // Spending tied to a bill or subscription is already counted in those lines.
         let variableSpending = inPeriod.filter { $0.recurringItem == nil }
         let categoryLines = categories.sorted { $0.sortOrder < $1.sortOrder }.map { category in
             let spent = variableSpending.filter { $0.category?.id == category.id }.reduce(0) { $0 + $1.spendingAmount }
-            return BudgetLine(name: category.name, planned: category.budgetPerPaycheck * categoryFactor, actual: spent, systemImage: category.systemImage, colorName: category.colorName)
+            return BudgetLine(name: category.name, planned: category.monthlyBudget, actual: spent, systemImage: category.systemImage, colorName: category.colorName)
         }
         let uncategorized = variableSpending.filter { $0.category == nil }.reduce(0) { $0 + $1.spendingAmount }
 
@@ -229,7 +223,7 @@ struct FinanceEngine {
         return BudgetBreakdown(
             period: period,
             paydayCount: paydays.count,
-            expectedIncome: basePaycheck * Double(paydays.count),
+            expectedIncome: expectedIncome,
             actualIncome: max(actualIncome, 0),
             payYourselfFirst: lines(.payYourselfFirst),
             bills: lines(.bill),
@@ -269,15 +263,16 @@ struct FinanceEngine {
         let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
         let inWindow = transactions.filter { $0.date >= start && $0.date < end && $0.spendingAmount != 0 }
         let windowDays = Double(max(calendar.dateComponents([.day], from: start, to: date).day ?? 14, 1))
-        let periodDays = Double(currentPeriod.dayCount)
-        let scale = windowDays / periodDays
+        // Group budgets are monthly; scale them to the window being shown.
+        let periodDays = Double(budgetMonth().dayCount)
+        let scale = min(windowDays / periodDays, 1)
 
         var result = categories.sorted { $0.sortOrder < $1.sortOrder }.map { category in
             let items = inWindow.filter { $0.category?.id == category.id }
             return GroupSpend(
                 category: category,
                 spent: items.reduce(0) { $0 + $1.spendingAmount },
-                budget: category.budgetPerPaycheck * scale,
+                budget: category.monthlyBudget * scale,
                 discretionary: items.filter { $0.recurringItem == nil }.reduce(0) { $0 + $1.spendingAmount }
             )
         }

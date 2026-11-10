@@ -15,7 +15,7 @@ struct SafeToSpendIntent: AppIntent {
         let days = snapshot.daysUntilPayday
         let dialog: IntentDialog = snapshot.safeToSpend >= 0
             ? "You have \(amount) safe to spend for the next \(days) days. That's about \(daily) a day."
-            : "You're \(amount) over until payday in \(days) days. Try to hold off on extra spending."
+            : "You're \(amount) over budget this month, with \(days) days to go. Try to hold off on extra spending."
         return .result(value: snapshot.safeToSpend, dialog: dialog)
     }
 }

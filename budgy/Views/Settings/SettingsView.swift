@@ -8,6 +8,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                AccountSection()
                 Section {
                     NavigationLink { PayScheduleSettings() } label: {
                         Label("Paycheck", systemImage: "dollarsign.circle.fill")
@@ -65,6 +66,13 @@ private struct PayScheduleForm: View {
     @Bindable var schedule: PaySchedule
     var engine: FinanceEngine
     @State private var useOverride = false
+    @State private var useIncomeOverride = false
+
+    private func ordinal(_ day: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .ordinal
+        return formatter.string(from: NSNumber(value: day)) ?? "\(day)"
+    }
 
     var body: some View {
         Section {
@@ -102,6 +110,40 @@ private struct PayScheduleForm: View {
         } footer: {
             Text("Because overtime varies, Budgy budgets on a conservative base: the lower end of your last 6 paychecks. Anything above it shows up as extra pay you can send to a goal.")
         }
+
+        Section {
+            Picker("Starts on", selection: $schedule.budgetCycleDay) {
+                Text(engine.detectedBudgetCycleDay.map { "Auto (the \(ordinal($0)))" } ?? "Auto").tag(0)
+                ForEach(1...31, id: \.self) { Text("The \(ordinal($0))").tag($0) }
+            }
+            LabeledContent("This budget month") {
+                let month = engine.budgetMonth()
+                let end = Calendar.current.date(byAdding: .day, value: -1, to: month.end) ?? month.end
+                Text("\(month.start.formatted(.dateTime.month(.abbreviated).day())) – \(end.formatted(.dateTime.month(.abbreviated).day()))")
+            }
+        } header: {
+            Text("Budget Month")
+        } footer: {
+            Text("Your budget month starts the day you pay your credit card off to $0. Auto uses the day your card payments usually go out.")
+        }
+
+        Section {
+            Toggle("Set monthly income manually", isOn: $useIncomeOverride.animation())
+            if useIncomeOverride {
+                LabeledContent("Monthly income") {
+                    TextField("Amount", value: $schedule.monthlyIncomeOverride, format: .currency(code: "USD"))
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+            LabeledContent("Budgy budgets on", value: engine.monthlyIncome.currency)
+        } header: {
+            Text("Monthly Income")
+        } footer: {
+            Text("Estimated as \(engine.paychecksPerMonth) × your base paycheck (\(engine.basePaycheck.currency)) from deposits to your checking account. Months with an extra paycheck count it as bonus money.")
+        }
+        .onAppear { useIncomeOverride = schedule.monthlyIncomeOverride > 0 }
+        .onChange(of: useIncomeOverride) { _, on in if !on { schedule.monthlyIncomeOverride = 0 } }
 
         Section {
             TextField("e.g. acme payroll", text: $schedule.matchText)
@@ -395,5 +437,57 @@ private struct DataSection: View {
         try? context.save()
         SampleData.ensureDefaultCategories(context: context)
         SyncService.performHousekeeping(context: context)
+    }
+}
+
+// MARK: - Account
+
+private struct AccountSection: View {
+    @Environment(AccountStore.self) private var accounts
+    @Environment(SyncService.self) private var sync
+    @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmDelete = false
+
+    var body: some View {
+        Section {
+            if let user = accounts.currentUser {
+                HStack(spacing: 14) {
+                    Text(String(user.firstName.prefix(1)).uppercased())
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 48, height: 48)
+                        .background(Circle().fill(.tint))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(user.name).font(.headline)
+                        Text(user.email).font(.subheadline).foregroundStyle(.secondary)
+                        if user.isTestAccount {
+                            Text("Test account").font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+                Button("Sign Out") {
+                    dismiss()
+                    accounts.signOut()
+                }
+                Button("Delete Account", role: .destructive) { confirmDelete = true }
+                    .confirmationDialog("Delete your Budgy account?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                        Button("Delete Account and Data", role: .destructive) {
+                            dismiss()
+                            accounts.deleteAccount(context: context, sync: sync)
+                        }
+                    } message: {
+                        Text("This removes the account and all of Budgy's data on this iPhone. Banks connected through your relay stay connected there.")
+                    }
+            } else {
+                Button("Sign In or Create Account") {
+                    dismiss()
+                    accounts.signOut()
+                }
+            }
+        } header: {
+            Text("Account")
+        }
     }
 }

@@ -37,13 +37,13 @@ nonisolated enum SnapshotStore {
 
     @MainActor
     static func write(engine: FinanceEngine) {
-        let result = engine.safeToSpend()
-        let nextCharge = result.upcoming.first { $0.source != .goal }
+        let result = engine.monthlySpend()
+        let nextCharge = result.scheduled.first { $0.date >= Calendar.current.startOfDay(for: .now) }
         let snapshot = BudgySnapshot(
-            safeToSpend: result.amount,
-            dailyAllowance: result.dailyAllowance,
+            safeToSpend: result.left,
+            dailyAllowance: result.perDay,
             daysUntilPayday: result.daysRemaining,
-            nextPayday: engine.nextPayday,
+            nextPayday: result.period.end,
             netWorth: engine.netWorth,
             nextChargeName: nextCharge?.name,
             nextChargeAmount: nextCharge?.amount,

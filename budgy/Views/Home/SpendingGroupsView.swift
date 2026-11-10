@@ -244,7 +244,7 @@ struct GroupDetailView: View {
                 HStack(spacing: 14) {
                     IconBadge(systemImage: category.systemImage, color: BudgyColor.named(category.colorName), size: 48)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(category.budgetPerPaycheck > 0 ? "\(category.budgetPerPaycheck.currencyWhole) per paycheck" : "No budget")
+                        Text(category.monthlyBudget > 0 ? "\(category.monthlyBudget.currencyWhole) per month" : "No budget")
                             .font(.headline)
                         Text("\(transactions.count) transaction\(transactions.count == 1 ? "" : "s")")
                             .font(.subheadline)

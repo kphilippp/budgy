@@ -1,6 +1,9 @@
 import Foundation
 import SwiftData
 import Observation
+import OSLog
+
+private let syncLog = Logger(subsystem: "com.kevinphilip.budgy", category: "Sync")
 
 /// Pulls balances and transactions from Plaid (via your relay) into SwiftData,
 /// then categorizes, matches recurring charges, and detects new subscriptions.
@@ -113,7 +116,12 @@ final class SyncService {
             lastSynced = .now
             UserDefaults.standard.set(Date.now, forKey: SettingsKeys.lastSync)
         } catch {
+            syncLog.error("Sync failed: \(String(describing: error), privacy: .public)")
             lastError = error.localizedDescription
+        }
+        let itemErrors = ((try? context.fetch(FetchDescriptor<PlaidItem>())) ?? []).filter { !$0.lastError.isEmpty }
+        for item in itemErrors {
+            syncLog.error("\(item.institutionName, privacy: .public): \(item.lastError, privacy: .public)")
         }
         Self.performHousekeeping(context: context)
     }

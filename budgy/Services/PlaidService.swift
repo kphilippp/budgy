@@ -1,5 +1,8 @@
 import Foundation
 import Security
+import OSLog
+
+private let relayLog = Logger(subsystem: "com.kevinphilip.budgy", category: "Relay")
 
 /// Talks to your Budgy relay server (see /Server). Never talks to Plaid directly.
 struct PlaidService {
@@ -21,8 +24,10 @@ struct PlaidService {
     /// Builds a service from saved settings, or nil if you haven't set up the server yet.
     static var configured: PlaidService? {
         let urlString = UserDefaults.standard.string(forKey: SettingsKeys.serverURL) ?? ""
-        guard let url = URL(string: urlString.trimmingCharacters(in: .whitespaces)), url.scheme == "https",
-              let token = Keychain.read(SettingsKeys.appToken), !token.isEmpty else { return nil }
+        // Trim stray spaces or line breaks from pasting, which would make the relay reject the token.
+        guard let url = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines)), url.scheme == "https",
+              let token = Keychain.read(SettingsKeys.appToken)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !token.isEmpty else { return nil }
         return PlaidService(baseURL: url, appToken: token)
     }
 
@@ -124,13 +129,29 @@ struct PlaidService {
         request.setValue("Bearer \(appToken)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            relayLog.error("\(path, privacy: .public) network error: \(error.localizedDescription, privacy: .public)")
+            throw error
+        }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             let message = (try? JSONDecoder().decode(ErrorBody.self, from: data))?.error ?? "Server returned \(status)"
+            relayLog.error("\(path, privacy: .public) failed (\(status)): \(message, privacy: .public)")
             throw ServiceError.server(message)
         }
-        return try JSONDecoder().decode(Response.self, from: data)
+        do {
+            let decoded = try JSONDecoder().decode(Response.self, from: data)
+            relayLog.info("\(path, privacy: .public) ok (\(data.count) bytes)")
+            return decoded
+        } catch {
+            // Logs the shape problem, never the financial data itself.
+            relayLog.error("\(path, privacy: .public) unexpected response: \(String(describing: error), privacy: .public)")
+            throw error
+        }
     }
 }
 

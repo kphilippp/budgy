@@ -22,6 +22,8 @@ struct HomeView: View {
                             SampleDataBanner()
                         }
 
+                        SyncStatusBanner()
+
                         SafeToSpendCard(monthly: monthly, groups: groups) {
                             showBreakdown = true
                         }
@@ -324,6 +326,55 @@ struct SafeToSpendBreakdownView: View {
 
 
 // MARK: - Cards
+
+/// Shows why a refresh failed instead of failing silently.
+private struct SyncStatusBanner: View {
+    @Environment(SyncService.self) private var sync
+    @Query private var items: [PlaidItem]
+    @State private var showConnections = false
+
+    private var message: String? {
+        if let error = sync.lastError { return error }
+        let failing = items.filter { !$0.lastError.isEmpty }
+        guard let first = failing.first else { return nil }
+        return "\(first.institutionName): \(first.lastError)" + (failing.count > 1 ? " (+\(failing.count - 1) more)" : "")
+    }
+
+    var body: some View {
+        if sync.isSyncing {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("Refreshing your accounts…").font(.subheadline)
+                Spacer()
+            }
+            .card(padding: 12)
+        } else if let message {
+            Button { showConnections = true } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Couldn't refresh").font(.subheadline.weight(.semibold))
+                        Text(message).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.leading)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                }
+                .card(padding: 12)
+            }
+            .buttonStyle(.plain)
+            .sheet(isPresented: $showConnections) {
+                NavigationStack {
+                    BankConnectionsView()
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done", systemImage: "checkmark") { showConnections = false }
+                            }
+                        }
+                }
+            }
+        }
+    }
+}
 
 private struct SampleDataBanner: View {
     @Environment(\.modelContext) private var context

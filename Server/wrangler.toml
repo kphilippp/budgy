@@ -1,6 +1,8 @@
 name = "budgy"
 main = "src/worker.js"
 compatibility_date = "2025-09-01"
+# Don't erase variables set in the Cloudflare dashboard when deploying from GitHub.
+keep_vars = true
 
 [vars]
 # "production" for real banks, "sandbox" for Plaid test data. This overrides the Cloudflare dashboard on every deploy.

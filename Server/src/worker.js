@@ -14,9 +14,15 @@ export default {
   async fetch(request, env) {
     if (request.method !== "POST") return json({ error: "POST only" }, 405);
 
-    const auth = request.headers.get("Authorization") || "";
-    if (!env.APP_TOKEN || auth !== `Bearer ${env.APP_TOKEN}`) {
-      return json({ error: "Unauthorized" }, 401);
+    // Say which setting is missing (never its value) so setup problems are easy to spot.
+    const missing = ["APP_TOKEN", "PLAID_CLIENT_ID", "PLAID_SECRET"].filter((name) => !env[name]);
+    if (missing.length) {
+      return json({ error: `Relay setup: missing ${missing.join(", ")}. Add them as Secrets in Cloudflare (Settings → Variables and Secrets), then deploy.` }, 500);
+    }
+
+    const auth = (request.headers.get("Authorization") || "").trim();
+    if (auth !== `Bearer ${env.APP_TOKEN.trim()}`) {
+      return json({ error: "Unauthorized: the App token in Budgy doesn't match APP_TOKEN on the relay." }, 401);
     }
 
     const path = new URL(request.url).pathname;

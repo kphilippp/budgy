@@ -21,3 +21,9 @@ Server/node_modules/
 Server/.wrangler/
 Server/.dev.vars
 .env
+
+# Signing and API keys never go in git
+*.p8
+*.p12
+*.mobileprovision
+scripts/testflight.env

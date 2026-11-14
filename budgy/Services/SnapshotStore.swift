@@ -25,7 +25,7 @@ nonisolated struct BudgySnapshot: Codable, Sendable {
 }
 
 nonisolated enum SnapshotStore {
-    static let appGroup = "group.com.budgy.shared"
+    static let appGroup = "group.com.kevinphilip.budgy"
     private static let key = "budgySnapshot"
 
     static var defaults: UserDefaults { UserDefaults(suiteName: appGroup) ?? .standard }

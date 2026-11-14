@@ -34,6 +34,7 @@
       "build-settings": {
         "ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES": "AppIcon-Midnight AppIcon-Sunset AppIcon-Ocean AppIcon-Mono",
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
+        "CODE_SIGN_ENTITLEMENTS": "Config/budgy.entitlements",
         "CODE_SIGN_STYLE": "Automatic",
         "CURRENT_PROJECT_VERSION": "1",
         "DEVELOPMENT_TEAM": "ZY527898U9",
@@ -42,6 +43,7 @@
         "ENABLE_USER_SELECTED_FILES": "readonly",
         "GENERATE_INFOPLIST_FILE": "YES",
         "INFOPLIST_KEY_CFBundleDisplayName": "Budgy",
+        "INFOPLIST_KEY_ITSAppUsesNonExemptEncryption": "NO",
         "INFOPLIST_KEY_NSFaceIDUsageDescription": "Budgy uses Face ID to keep your financial information private.",
         "INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]": "YES",
         "INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]": "YES",

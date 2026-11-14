@@ -23,6 +23,7 @@ private struct SubscriptionsContent: View {
     @Query(sort: \RecurringItem.nextDueDate) private var items: [RecurringItem]
     @State private var filter: RecurringKind = .subscription
     @State private var showNew = false
+    @Namespace private var zoom
 
     private var active: [RecurringItem] { items.filter { $0.isActive && !$0.needsReview } }
     private var review: [RecurringItem] { items.filter(\.needsReview) }
@@ -107,8 +108,10 @@ private struct SubscriptionsContent: View {
                     ForEach(filtered) { item in
                         NavigationLink {
                             RecurringReserveDetailView(item: item)
+                                .zoomDestination(item.id, in: zoom)
                         } label: {
                             RecurringRow(item: item)
+                                .zoomSource(item.id, in: zoom, cornerRadius: Radius.field)
                         }
                             .buttonStyle(.plain)
                             .padding(.vertical, 8)

@@ -7,7 +7,7 @@ description: Budgy's "Tidewater" design language and craft rules for its SwiftUI
 
 Budgy is a calm money app. People open it to answer one question — *what can I spend?* — often
 while slightly anxious. The design language, **Tidewater**, is cool, mineral, and organic:
-misty paper or deep forest ink underneath, one sea-glass accent, serif figures set like a
+misty paper or deep harbor ink underneath, one tide-blue accent, serif figures set like a
 statement, and soft irregular "pebbles" where other apps use circles and squares. Every decision
 serves **confidence and calm**: the number is clear, the interface responds instantly, nothing
 moves without a reason, and important moments (payday, a goal funded, a bill paid) are felt.
@@ -38,6 +38,9 @@ Always reuse these. Never add a second card style, radius, spring, font helper, 
 |---|---|
 | A drag, swipe, sheet, fling, hold-to-confirm | `gestures` (then translate with §6) |
 | Several things animating together; onboarding and payday flows | `choreograph` |
+| Onboarding structure (value moment first, branching, permission timing) | `onboarding-generator` (adapt its templates to Tidewater; never replace this file's tokens) |
+| SwiftUI animation APIs: PhaseAnimator, KeyframeAnimator, zoom transitions, symbol effects | `swiftui-animation`, `swiftui-motion` (+ `motion-principles`, `mobile-principles`), `animation-patterns` |
+| General SwiftUI code review (modern APIs, performance, accessibility) | `swiftui-pro` |
 | "What could animate here?" | `find-animation-opportunities` |
 | Reviewing a motion diff | `review-animations` |
 | Stress-testing a screen with real-world data | `break-ui` (one `#Preview` per dataset; data enters via `SampleData` / `DemoBankService`) |
@@ -54,11 +57,11 @@ color…). Use the palette; each token has a light and a dark value.
 
 | Role | Token |
 |---|---|
-| Page | `.canvas` (misty paper / forest ink) — via `.budgyCanvas()` or `BudgyBackground`, never a raw fill |
+| Page | `.canvas` (misty paper / harbor ink) — via `.budgyCanvas()` or `BudgyBackground`, never a raw fill |
 | Panels | `.surface`; floating things (swipe card, fields) `.surfaceRaised` |
 | Edges, dividers | `.hairline` — `Divider().overlay(Color.hairline)` |
 | Text | inherits `.ink` from the root; use `.secondary` / `.tertiary` for hierarchy (they derive from ink) |
-| Accent | `@Environment(\.themeColor)` (user-chosen; default Sea Glass) and `.tint` — never `Color.accentColor` |
+| Accent | `@Environment(\.themeColor)` (user-chosen; default Tide Blue) and `.tint` — never `Color.accentColor` |
 | Safe, saved, on track | `.positive` (moss) |
 | Due soon, near a limit, needs a look | `.caution` (ochre) |
 | Over, negative, late | `.negative` (clay) |
@@ -120,6 +123,8 @@ Rules:
 | Progress toward something good (goal, Roth limit, money step) | `ProgressBar(value:color:)` — never `BudgetBar`, which turns ochre near 100% |
 | A goal's progress | `ProgressRing(progress:color:lineWidth:seed:)` — fine arc + a pebble that grows with progress |
 | Tappable custom card | `.buttonStyle(.pressable)` |
+| A card or row that pushes a detail screen | `.zoomSource(id, in: ns)` on the label + `.zoomDestination(id, in: ns)` on the destination (one `@Namespace` per screen; unique ids per namespace) |
+| First-run entrance in a flow | the `Reveal` modifier pattern in `OnboardingView` (lead travels most; shrinking gaps; collapses to a fade under Reduce Motion) |
 | Include/exclude an account | the eye `IncludeToggle` in `AccountsView` (not a full-width switch in a crowded row) |
 | Primary action | `.buttonStyle(.glassProminent)` + `.foregroundStyle(.white)` — the root ink would otherwise replace the white label |
 

@@ -4,6 +4,7 @@ import SwiftData
 struct GoalsView: View {
     @Environment(\.themeColor) private var themeColor
     @State private var showNewGoal = false
+    @Namespace private var zoom
 
     var body: some View {
         NavigationStack {
@@ -36,8 +37,10 @@ struct GoalsView: View {
                                 ForEach(active) { goal in
                                     NavigationLink {
                                         GoalDetailView(goal: goal)
+                                            .zoomDestination(goal.id, in: zoom)
                                     } label: {
                                         GoalTile(goal: goal, status: GoalStatus(goal: goal, engine: engine))
+                                            .zoomSource(goal.id, in: zoom)
                                     }
                                     .buttonStyle(.pressable)
                                 }

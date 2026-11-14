@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-// Budgy's "Tidewater" palette: cool mineral neutrals, one sea-glass accent, and muted organic hues.
+// Budgy's "Tidewater" palette: cool mineral neutrals, one tide-blue accent, and muted organic hues.
 // Every color resolves separately for light and dark mode. Rules: .claude/skills/budgy-design/SKILL.md
 
 extension UIColor {
@@ -27,20 +27,20 @@ extension Color {
 
     // MARK: Surfaces
 
-    /// The page: misty paper in light mode, deep forest ink in dark mode.
-    static let canvas = Color(light: 0xF1F3EF, dark: 0x0B1110)
+    /// The page: misty paper in light mode, deep harbor ink in dark mode.
+    static let canvas = Color(light: 0xEFF1F3, dark: 0x0B0E11)
     /// Panels that sit on the canvas.
-    static let surface = Color(light: 0xFBFCFA, dark: 0x131A19)
+    static let surface = Color(light: 0xFAFBFC, dark: 0x13161A)
     /// Things that float above panels (the swipe card, sheets' fields).
-    static let surfaceRaised = Color(light: 0xFFFFFF, dark: 0x19221F)
+    static let surfaceRaised = Color(light: 0xFFFFFF, dark: 0x191D22)
     /// Panel edges and dividers.
-    static let hairline = Color(light: 0x13201C, dark: 0xE6EEEA, lightAlpha: 0.09, darkAlpha: 0.08)
+    static let hairline = Color(light: 0x131920, dark: 0xE6EAEE, lightAlpha: 0.09, darkAlpha: 0.08)
 
     // MARK: Ink
 
-    static let ink = Color(light: 0x13201C, dark: 0xE6EEEA)
-    static let inkSecondary = Color(light: 0x56645F, dark: 0x93A29D)
-    static let inkTertiary = Color(light: 0x8A9691, dark: 0x5F6D68)
+    static let ink = Color(light: 0x131920, dark: 0xE6EAEE)
+    static let inkSecondary = Color(light: 0x565D64, dark: 0x939AA2)
+    static let inkTertiary = Color(light: 0x8A9096, dark: 0x5F666D)
 
     // MARK: Organic hues (categories, goals, accounts, semantics)
 

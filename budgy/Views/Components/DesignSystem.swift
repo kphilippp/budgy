@@ -246,7 +246,7 @@ struct BudgyBackground: View {
                         ],
                         colors: [
                             themeColor.opacity(strong), Color.glacier.opacity(soft), clear,
-                            themeColor.opacity(soft * 0.6), clear, Color.moss.opacity(soft * 0.45),
+                            themeColor.opacity(soft * 0.6), clear, Color.lake.opacity(soft * 0.45),
                             clear, clear, clear
                         ]
                     )
@@ -343,4 +343,22 @@ struct PressableButtonStyle: ButtonStyle {
 
 extension ButtonStyle where Self == PressableButtonStyle {
     static var pressable: PressableButtonStyle { PressableButtonStyle() }
+}
+
+// MARK: - Zoom navigation
+
+extension View {
+    /// Marks a card or row that a pushed screen grows out of (and shrinks back into).
+    /// Pair with `zoomDestination(_:in:)` on the destination's root, using the same id and namespace.
+    /// The system owns the curve, keeps the interactive swipe back, and crossfades under Reduce Motion.
+    func zoomSource(_ id: some Hashable, in namespace: Namespace.ID, cornerRadius: CGFloat = Radius.panel) -> some View {
+        matchedTransitionSource(id: id, in: namespace) { source in
+            source.clipShape(.rect(cornerRadius: cornerRadius, style: .continuous))
+        }
+    }
+
+    /// The pushed screen side of `zoomSource(_:in:)`. Put it on the destination's outermost view.
+    func zoomDestination(_ id: some Hashable, in namespace: Namespace.ID) -> some View {
+        navigationTransition(.zoom(sourceID: id, in: namespace))
+    }
 }

@@ -6,6 +6,7 @@ struct AccountsView: View {
     @Environment(\.modelContext) private var context
     @Environment(SyncService.self) private var sync
     @State private var showAddAccount = false
+    @Namespace private var zoom
 
     var body: some View {
         NavigationStack {
@@ -18,11 +19,11 @@ struct AccountsView: View {
                         let creditCards = ordered.filter { $0.kind == .creditCard && !$0.isHidden }
                         if !creditCards.isEmpty {
                             // Highest utilization first: that's the card to pay down first.
-                            CreditHealthCard(cards: creditCards.sorted { $0.utilization > $1.utilization }, credit: engine.credit)
+                            CreditHealthCard(cards: creditCards.sorted { $0.utilization > $1.utilization }, credit: engine.credit, zoom: zoom)
                         }
-                        AccountGroup(title: "Cash", accounts: ordered.filter { $0.kind == .checking || $0.kind == .savings || $0.kind == .other }, engine: engine)
-                        AccountGroup(title: "Credit Cards", accounts: ordered.filter { $0.kind == .creditCard }, engine: engine)
-                        AccountGroup(title: "Investments & Retirement", accounts: ordered.filter(\.kind.isInvestment), engine: engine)
+                        AccountGroup(title: "Cash", accounts: ordered.filter { $0.kind == .checking || $0.kind == .savings || $0.kind == .other }, engine: engine, zoom: zoom)
+                        AccountGroup(title: "Credit Cards", accounts: ordered.filter { $0.kind == .creditCard }, engine: engine, zoom: zoom)
+                        AccountGroup(title: "Investments & Retirement", accounts: ordered.filter(\.kind.isInvestment), engine: engine, zoom: zoom)
 
                         if engine.includedAccounts.contains(where: { $0.kind == .rothIRA }) {
                             RothProgressCard(engine: engine)
@@ -57,6 +58,7 @@ struct AccountsView: View {
 private struct CreditHealthCard: View {
     var cards: [Account]
     var credit: CreditSnapshot
+    var zoom: Namespace.ID
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -109,7 +111,7 @@ private struct CreditHealthCard: View {
             }
 
             ForEach(cards) { card in
-                CreditHealthRow(card: card)
+                CreditHealthRow(card: card, zoom: zoom)
                 if card.id != cards.last?.id { Divider().overlay(Color.hairline) }
             }
         }
@@ -145,10 +147,12 @@ private struct CreditWarningRow: View {
 
 private struct CreditHealthRow: View {
     var card: Account
+    var zoom: Namespace.ID
 
     var body: some View {
         NavigationLink {
             AccountDetailView(account: card)
+                .zoomDestination("credit-\(card.id)", in: zoom)
         } label: {
             VStack(alignment: .leading, spacing: 7) {
                 HStack {
@@ -179,6 +183,7 @@ private struct CreditHealthRow: View {
                 }
             }
             .contentShape(.rect)
+            .zoomSource("credit-\(card.id)", in: zoom, cornerRadius: Radius.field)
         }
         .buttonStyle(.plain)
     }
@@ -287,6 +292,7 @@ private struct AccountGroup: View {
     var title: String
     var accounts: [Account]
     var engine: FinanceEngine
+    var zoom: Namespace.ID
 
     var body: some View {
         if !accounts.isEmpty {
@@ -297,9 +303,11 @@ private struct AccountGroup: View {
                         HStack(alignment: .top, spacing: 8) {
                             NavigationLink {
                                 AccountDetailView(account: account)
+                                    .zoomDestination(account.id, in: zoom)
                             } label: {
                                 AccountRow(account: account, engine: engine)
                                     .opacity(account.isHidden ? 0.55 : 1)
+                                    .zoomSource(account.id, in: zoom, cornerRadius: Radius.field)
                             }
                             .buttonStyle(.plain)
 

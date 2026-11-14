@@ -13,9 +13,25 @@ struct OnboardingView: View {
         case welcome, account, bank, budget, savings, preferences, done
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var step: Step = .welcome
+    /// Next slides content left, Back slides it right, so the motion matches the button.
+    @State private var isMovingForward = true
+    /// The welcome entrance plays once; returning with Back shows it at rest.
+    @State private var welcomeHasPlayed = false
     @State private var accountMode: AccountForm.Mode = .signUp
     @State private var isWorking = false
+
+    private var stepTransition: AnyTransition {
+        if reduceMotion { return .opacity }
+        let lead: Edge = isMovingForward ? .trailing : .leading
+        let trail: Edge = isMovingForward ? .leading : .trailing
+        return .asymmetric(
+            insertion: .move(edge: lead).combined(with: .opacity),
+            removal: .move(edge: trail).combined(with: .opacity)
+        )
+    }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -26,10 +42,11 @@ struct OnboardingView: View {
                 Group {
                     switch step {
                     case .welcome:
-                        WelcomeStep { mode in
+                        WelcomeStep(playsEntrance: !welcomeHasPlayed) { mode in
                             accountMode = mode
                             advance(to: .account)
                         }
+                        .onAppear { welcomeHasPlayed = true }
                     case .account:
                         AccountForm(mode: $accountMode) { signedInWithExistingData in
                             advance(to: signedInWithExistingData ? .done : .bank)
@@ -46,7 +63,7 @@ struct OnboardingView: View {
                         DoneStep { finish() }
                     }
                 }
-                .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity), removal: .move(edge: .leading).combined(with: .opacity)))
+                .transition(stepTransition)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
@@ -90,7 +107,9 @@ struct OnboardingView: View {
     }
 
     private func advance(to next: Step) {
-        withAnimation(Motion.standard) { step = next }
+        // Set the direction first so the leaving step exits the right way.
+        isMovingForward = next.rawValue > step.rawValue
+        withAnimation(Motion.animation(Motion.gentle, reduceMotion: reduceMotion)) { step = next }
     }
 
     private func finish() {
@@ -187,9 +206,37 @@ private struct PrimaryButton: View {
     }
 }
 
+/// Fades and lifts an element into place as part of a first-run entrance.
+private struct Reveal: ViewModifier {
+    var isShown: Bool
+    var delay: Double
+    var rise: CGFloat
+    var scale: CGFloat = 1
+    var reduceMotion: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isShown ? 1 : 0)
+            .offset(y: isShown || reduceMotion ? 0 : rise)
+            .scaleEffect(isShown || reduceMotion ? 1 : scale)
+            // Under Reduce Motion the group appears together with a short fade.
+            .animation(reduceMotion ? Motion.reducedFade : Motion.gentle.delay(delay), value: isShown)
+    }
+}
+
 private struct WelcomeStep: View {
     @Environment(\.themeColor) private var themeColor
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// False when coming back with Back: the screen is already familiar, so it shows at rest.
+    var playsEntrance: Bool
     var onContinue: (AccountForm.Mode) -> Void
+
+    @State private var isShown = false
+
+    // First-run timeline (seen once, so it may take a little longer than product UI):
+    // icon leads with the most travel → title + tagline as one beat → feature rows ripple with
+    // shrinking gaps → actions arrive last. Everything is tappable as soon as it's visible.
+    private static let featureDelays = [0.24, 0.31, 0.37, 0.42]
 
     var body: some View {
         VStack(spacing: 28) {
@@ -200,6 +247,7 @@ private struct WelcomeStep: View {
                 .clipShape(.rect(cornerRadius: 26, style: .continuous))
                 .shadow(color: .black.opacity(0.25), radius: 16, y: 8)
                 .accessibilityHidden(true)
+                .modifier(Reveal(isShown: isShown, delay: 0, rise: 28, scale: 0.9, reduceMotion: reduceMotion))
             VStack(spacing: 10) {
                 Text("Budgy").scaledFont(size: 52, weight: .semibold, design: .serif)
                 Text("Know exactly what you can spend,\nevery day of the month.")
@@ -207,11 +255,12 @@ private struct WelcomeStep: View {
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
             }
+            .modifier(Reveal(isShown: isShown, delay: 0.12, rise: 16, reduceMotion: reduceMotion))
             VStack(alignment: .leading, spacing: 14) {
-                feature("calendar", "A monthly budget that starts when your card is paid off")
-                feature("chart.pie.fill", "Spending groups, sorted automatically")
-                feature("repeat.circle.fill", "Every subscription and bill in one place")
-                feature("lock.fill", "Private: your data stays on your iPhone")
+                feature("calendar", "A monthly budget that starts when your card is paid off", index: 0)
+                feature("chart.pie.fill", "Spending groups, sorted automatically", index: 1)
+                feature("repeat.circle.fill", "Every subscription and bill in one place", index: 2)
+                feature("lock.fill", "Private: your data stays on your iPhone", index: 3)
             }
             .padding(.horizontal, 8)
             Spacer()
@@ -221,8 +270,29 @@ private struct WelcomeStep: View {
                     .font(.subheadline.weight(.medium))
             }
             .padding(.bottom, 64)
+            .modifier(Reveal(isShown: isShown, delay: 0.48, rise: 8, reduceMotion: reduceMotion))
         }
         .padding(.horizontal, 24)
+        .onAppear {
+            if playsEntrance {
+                isShown = true
+            } else {
+                var instant = SwiftUI.Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { isShown = true }
+            }
+        }
+    }
+
+    private func feature(_ systemImage: String, _ text: String, index: Int) -> some View {
+        HStack(spacing: 14) {
+            IconBadge(systemImage: systemImage, color: themeColor, size: 34)
+            Text(text)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .modifier(Reveal(isShown: isShown, delay: Self.featureDelays[index], rise: 10, reduceMotion: reduceMotion))
     }
 
     private func feature(_ systemImage: String, _ text: String) -> some View {
@@ -546,29 +616,83 @@ private struct PreferencesStep: View {
     }
 }
 
+/// The value moment: the first time the user sees their own Safe to Spend.
+/// The seal settles (cause), then the number counts up from $0 (effect), then the button is there.
 private struct DoneStep: View {
     @Environment(\.themeColor) private var themeColor
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AccountStore.self) private var accounts
     var onFinish: () -> Void
 
+    @State private var sealShown = false
+    @State private var shownAmount: Double = 0
+    @State private var amountShown = false
+
     var body: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            IconBadge(systemImage: "checkmark.seal.fill", color: themeColor, size: 96)
-                .symbolEffect(.bounce, options: .nonRepeating)
-            VStack(spacing: 8) {
-                Text(accounts.currentUser.map { "You're all set, \($0.firstName)!" } ?? "You're all set!")
-                    .font(.display(.largeTitle))
-                    .multilineTextAlignment(.center)
-                Text("Budgy will keep your Safe to Spend up to date as you spend.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+        EngineReader { engine in
+            let monthly = engine.monthlySpend()
+            let hasMoney = !engine.includedAccounts.isEmpty
+            VStack(spacing: 24) {
+                Spacer()
+                IconBadge(systemImage: "checkmark.seal.fill", color: themeColor, size: 96)
+                    .scaleEffect(sealShown || reduceMotion ? 1 : 0.85)
+                    .opacity(sealShown ? 1 : 0)
+                VStack(spacing: 8) {
+                    Text(accounts.currentUser.map { "You're all set, \($0.firstName)!" } ?? "You're all set!")
+                        .font(.display(.largeTitle))
+                        .multilineTextAlignment(.center)
+                    if !hasMoney {
+                        Text("Budgy will keep your Safe to Spend up to date as you spend.")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .opacity(sealShown ? 1 : 0)
+
+                if hasMoney {
+                    VStack(spacing: 6) {
+                        Text("Safe to Spend").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                        MoneyText(shownAmount, size: 56)
+                            .foregroundStyle(shownAmount < 0 ? AnyShapeStyle(.negative) : AnyShapeStyle(.ink))
+                        Text("until \(monthly.safeUntilDate.formatted(.dateTime.month(.wide).day())), after bills, savings, and your card")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .opacity(amountShown ? 1 : 0)
+                    .offset(y: amountShown || reduceMotion ? 0 : 10)
+                }
+                Spacer()
+                PrimaryButton(title: "Start Budgeting", action: onFinish)
+                    .padding(.bottom, 64)
+                    .opacity(sealShown ? 1 : 0)
             }
-            Spacer()
-            PrimaryButton(title: "Start Budgeting", action: onFinish)
-                .padding(.bottom, 64)
+            .padding(.horizontal, 24)
+            .onAppear { play(target: monthly.left, hasMoney: hasMoney) }
         }
-        .padding(.horizontal, 24)
+    }
+
+    private func play(target: Double, hasMoney: Bool) {
+        guard !sealShown else { return }
+        if reduceMotion {
+            withAnimation(Motion.reducedFade) {
+                sealShown = true
+                amountShown = true
+                shownAmount = target
+            }
+            return
+        }
+        withAnimation(Motion.gentle, completionCriteria: .logicallyComplete) {
+            sealShown = true
+        } completion: {
+            guard hasMoney else { return }
+            // The digits roll from $0 to the real figure: the number is the payoff of setup.
+            withAnimation(Motion.gentle) {
+                amountShown = true
+                shownAmount = target
+            }
+            Haptics.success()
+        }
     }
 }

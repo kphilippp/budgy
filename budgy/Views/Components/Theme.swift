@@ -40,7 +40,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .teal: "Sea Glass"
-        case .blue: "Lake"
+        case .blue: "Tide Blue"
         case .indigo: "Dusk"
         case .purple: "Heather"
         case .pink: "Rosehip"
@@ -54,7 +54,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var color: Color {
         switch self {
         case .teal: Color(light: 0x2E6E5E, dark: 0x4E9F88)
-        case .blue: Color(light: 0x3A6688, dark: 0x5F8FB3)
+        case .blue: Color(light: 0x2E4E6E, dark: 0x4E769F)
         case .indigo: Color(light: 0x4B568C, dark: 0x7680C4)
         case .purple: Color(light: 0x6B5790, dark: 0x9681BF)
         case .pink: Color(light: 0x9C4D66, dark: 0xC27A90)
@@ -67,7 +67,7 @@ enum AppTheme: String, CaseIterable, Identifiable {
 
 extension EnvironmentValues {
     /// The user's accent. Set once in `RootView`; read it instead of `Color.accentColor`.
-    @Entry var themeColor: Color = AppTheme.teal.color
+    @Entry var themeColor: Color = AppTheme.blue.color
 }
 
 enum BudgyColor {

@@ -364,7 +364,7 @@ private struct PreferencesSection: View {
     @AppStorage(SettingsKeys.usePrivateCloudCompute) private var usePCC = false
     @AppStorage("rothAnnualLimit") private var rothLimit: Double = 7_500
     @AppStorage(SettingsKeys.appearance) private var appearance: AppAppearance = .dark
-    @AppStorage(SettingsKeys.themeColor) private var theme: AppTheme = .teal
+    @AppStorage(SettingsKeys.themeColor) private var theme: AppTheme = .blue
 
     var body: some View {
         Section {

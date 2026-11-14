@@ -37,9 +37,10 @@ struct RootView: View {
     @Environment(BiometricLock.self) private var lock
     @Environment(AccountStore.self) private var accounts
     @AppStorage(SettingsKeys.appearance) private var appearance: AppAppearance = .dark
-    @AppStorage(SettingsKeys.themeColor) private var theme: AppTheme = .teal
+    @AppStorage(SettingsKeys.themeColor) private var theme: AppTheme = .blue
     @Query(filter: #Predicate<Transaction> { $0.needsCategoryReview }) private var unsorted: [Transaction]
     @State private var navigation = AppNavigation()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -67,6 +68,8 @@ struct RootView: View {
             }
             .tabBarMinimizeBehavior(.onScrollDown)
             .environment(navigation)
+            // Finishing onboarding: the app settles in underneath as the flow fades away.
+            .transition(reduceMotion ? .opacity : .scale(scale: 0.96).combined(with: .opacity))
             }
 
             if lock.isEnabled && !lock.isUnlocked {
@@ -81,6 +84,13 @@ struct RootView: View {
         .tint(theme.color)
         .environment(\.themeColor, theme.color)
         .preferredColorScheme(appearance.colorScheme)
+        .onAppear {
+            // Tide Blue replaced Sea Glass as the default accent; move the old default over once.
+            let key = "didMigrateThemeToTideBlue"
+            guard !UserDefaults.standard.bool(forKey: key) else { return }
+            if theme == .teal { theme = .blue }
+            UserDefaults.standard.set(true, forKey: key)
+        }
         #if DEBUG
         // `-BudgyTab budget` (any AppTab) opens that tab, for screenshots and design review.
         .onAppear {

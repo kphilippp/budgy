@@ -20,6 +20,7 @@ build/
 Server/node_modules/
 Server/.wrangler/
 Server/.dev.vars
+Server/.e2e-state.json
 .env
 
 # Signing and API keys never go in git
@@ -27,3 +28,4 @@ Server/.dev.vars
 *.p12
 *.mobileprovision
 scripts/testflight.env
+Server/worker-configuration.d.ts

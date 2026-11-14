@@ -1,0 +1,27 @@
+{
+  "name": "budgy-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --env dev",
+    "test": "vitest run",
+    "typecheck": "wrangler types --include-env=false && tsc --noEmit",
+    "types": "wrangler types --include-env=false",
+    "deploy": "wrangler d1 migrations apply budgy-prod --remote && wrangler deploy",
+    "deploy:dev": "wrangler d1 migrations apply budgy-dev --remote --env dev && wrangler deploy --env dev",
+    "e2e:dev": "node scripts/e2e-dev.mjs"
+  },
+  "dependencies": {
+    "jose": "^6.2.17"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.2",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.162.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "workerd@1.20261113.1": true
+  }
+}

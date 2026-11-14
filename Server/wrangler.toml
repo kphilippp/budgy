@@ -1,14 +1,70 @@
+# Budgy API. Production is the top level (worker "budgy", deployed by Workers Builds from `main`
+# with `npm run deploy`); `--env dev` is worker "budgy-dev" on Plaid's sandbox, deployed from a Mac
+# with `npm run deploy:dev`. Secrets are set with `wrangler secret put` (see README.md); everything
+# else lives here, so the dashboard holds no hand-set variables.
+
 name = "budgy"
-main = "src/worker.js"
-compatibility_date = "2025-09-01"
-# Don't erase variables set in the Cloudflare dashboard when deploying from GitHub.
-keep_vars = true
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+workers_dev = true
+preview_urls = false
+
+[observability]
+enabled = true
+
+[triggers]
+# Safety net for missed Plaid webhooks, plus housekeeping.
+crons = ["*/10 * * * *"]
+
+[version_metadata]
+binding = "CF_VERSION_METADATA"
 
 [vars]
-# "production" for real banks, "sandbox" for Plaid test data. This overrides the Cloudflare dashboard on every deploy.
+ENVIRONMENT = "production"
 PLAID_ENV = "production"
+# The server's base URL, in one place (Plaid webhooks point here). Change it if a custom domain is added.
+PUBLIC_URL = "https://budgy.thebudgyapp.workers.dev"
+APPLE_BUNDLE_ID = "com.kevinphilip.budgy"
+APPLE_TEAM_ID = "ZY527898U9"
+APPLE_SIWA_KEY_ID = "VGLUZ6H3NV"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "budgy-prod"
+database_id = "c6eba7c2-a0fc-4259-81f9-16c1f4117816"
+migrations_dir = "migrations"
+
+# The old relay's bank connections, read once by /migrate/claim-legacy. Remove after cleanup.
 [[kv_namespaces]]
-binding = "ITEMS"
-# KV namespace "budgy_items"
+binding = "LEGACY_ITEMS"
 id = "406b620f779b40baa8671ac000f6c803"
+
+[[ratelimits]]
+name = "AUTH_LIMITER"
+namespace_id = "1001"
+simple = { limit = 20, period = 60 }
+
+[env.dev]
+name = "budgy-dev"
+
+[env.dev.vars]
+ENVIRONMENT = "dev"
+PLAID_ENV = "sandbox"
+PUBLIC_URL = "https://budgy-dev.thebudgyapp.workers.dev"
+APPLE_BUNDLE_ID = "com.kevinphilip.budgy"
+APPLE_TEAM_ID = "ZY527898U9"
+APPLE_SIWA_KEY_ID = "VGLUZ6H3NV"
+
+[env.dev.version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[[env.dev.d1_databases]]
+binding = "DB"
+database_name = "budgy-dev"
+database_id = "20c733a7-ba71-4763-a76f-b92e51e28df7"
+migrations_dir = "migrations"
+
+[[env.dev.ratelimits]]
+name = "AUTH_LIMITER"
+namespace_id = "1002"
+simple = { limit = 20, period = 60 }

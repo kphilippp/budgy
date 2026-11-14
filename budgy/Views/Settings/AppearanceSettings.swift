@@ -9,20 +9,15 @@ struct ThemeSwatches: View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 8), spacing: 10) {
             ForEach(AppTheme.allCases) { theme in
                 Button {
-                    withAnimation(.smooth) { selection = theme }
+                    withAnimation(Motion.quick) { selection = theme }
                 } label: {
-                    Circle()
-                        .fill(theme.color.gradient)
+                    Pebble(seed: theme.rawValue.stableHash)
+                        .fill(theme.color)
                         .frame(width: 30, height: 30)
                         .overlay {
-                            if selection == theme {
-                                Image(systemName: "checkmark")
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(.white)
-                            }
-                        }
-                        .overlay {
-                            Circle().stroke(.primary.opacity(selection == theme ? 0.5 : 0), lineWidth: 2).padding(-3)
+                            Pebble(seed: theme.rawValue.stableHash)
+                                .stroke(Color.ink.opacity(selection == theme ? 0.7 : 0), lineWidth: 2)
+                                .padding(-5)
                         }
                 }
                 .buttonStyle(.plain)
@@ -111,7 +106,7 @@ struct AppIconPicker: View {
             if let errorMessage {
                 Text(errorMessage)
                     .font(.footnote)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.negative)
                     .padding(.horizontal)
             }
         }

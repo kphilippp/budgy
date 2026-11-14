@@ -43,7 +43,7 @@ enum AccountKind: String, Codable, CaseIterable, Identifiable {
         self == .retirement401k || self == .rothIRA || self == .brokerage
     }
 
-    /// Cash you can actually spend from day to day.
+    /// Cash available for day-to-day spending. Savings remains protected.
     var isSpendableCash: Bool { self == .checking }
 }
 

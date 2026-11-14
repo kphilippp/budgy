@@ -10,7 +10,11 @@ struct SortView: View {
     private var pending: [Transaction]
     @Query(sort: \Category.sortOrder) private var groups: [Category]
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dragOffset: CGSize = .zero
+    @GestureState private var isDragging = false
+    @State private var sortCount = 0
+    @State private var undoCount = 0
     @State private var showPicker = false
     @State private var rememberMerchant = true
     @State private var lastAction: SortAction?
@@ -53,7 +57,7 @@ struct SortView: View {
             }
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(Color(.systemGroupedBackground))
+            .budgyCanvas()
             .navigationTitle("Sort")
             .toolbar {
                 if lastAction != nil {
@@ -73,7 +77,24 @@ struct SortView: View {
                 }
             }
             .sheet(isPresented: $showNewGroup) { CategoryEditor(category: nil) }
+            // A detent tick as the card crosses the commit line (either way), only while dragging.
+            .sensoryFeedback(trigger: swipeZone) { _, zone in
+                isDragging && zone != 0 ? .selection : nil
+            }
+            .sensoryFeedback(.impact(weight: .medium), trigger: sortCount)
+            .sensoryFeedback(.impact(weight: .light), trigger: undoCount)
         }
+    }
+
+    // MARK: Swipe
+
+    private static let swipeThreshold: CGFloat = 110
+
+    /// -1 past the left commit line, 1 past the right one, 0 in between.
+    private var swipeZone: Int {
+        if dragOffset.width > Self.swipeThreshold { return 1 }
+        if dragOffset.width < -Self.swipeThreshold { return -1 }
+        return 0
     }
 
     // MARK: Cards
@@ -85,7 +106,7 @@ struct SortView: View {
                 if index == 0 {
                     SortCard(transaction: transaction, suggestion: transaction.category, swipe: dragOffset.width)
                         .offset(dragOffset)
-                        .rotationEffect(.degrees(Double(dragOffset.width / 18)))
+                        .rotationEffect(.degrees(reduceMotion ? 0 : Double(dragOffset.width / 18)))
                         .gesture(swipeGesture(for: transaction))
                 } else {
                     SortCard(transaction: transaction, suggestion: transaction.category, swipe: 0)
@@ -96,30 +117,54 @@ struct SortView: View {
                 }
             }
         }
-        .animation(.spring(duration: 0.35), value: queue.first?.id)
+        .animation(Motion.animation(Motion.standard, reduceMotion: reduceMotion), value: queue.first?.id)
     }
 
     private func swipeGesture(for transaction: Transaction) -> some Gesture {
-        DragGesture()
-            .onChanged { dragOffset = $0.translation }
+        DragGesture(minimumDistance: 10)
+            .updating($isDragging) { _, state, _ in state = true }
+            .onChanged { value in
+                // Track phase: glued to the finger horizontally, resisting vertically.
+                dragOffset = CGSize(
+                    width: value.translation.width,
+                    height: rubberBand(value.translation.height, dimension: 300)
+                )
+            }
             .onEnded { value in
-                let threshold: CGFloat = 110
-                if value.translation.width > threshold, let suggestion = transaction.category {
-                    flyOff(direction: 1) { sort(transaction, into: suggestion) }
-                } else if value.translation.width > threshold || value.translation.width < -threshold {
-                    // No suggestion, or swiped left: choose a group.
-                    withAnimation(.spring) { dragOffset = .zero }
-                    showPicker = true
+                // Release phase: decide from where the flick is *going*, not where it let go,
+                // so a short fast flick commits just like a long drag.
+                let projected = value.predictedEndTranslation.width
+                let committedRight = projected > Self.swipeThreshold
+                let committedLeft = projected < -Self.swipeThreshold
+
+                if committedRight, let suggestion = transaction.category {
+                    flyOff(direction: 1, velocity: value.velocity.width) { sort(transaction, into: suggestion) }
                 } else {
-                    withAnimation(.spring) { dragOffset = .zero }
+                    withAnimation(Motion.animation(Motion.momentum, reduceMotion: reduceMotion)) { dragOffset = .zero }
+                    // No suggestion, or swiped left: choose a group.
+                    if committedRight || committedLeft { showPicker = true }
                 }
             }
     }
 
-    private func flyOff(direction: CGFloat, then action: @escaping () -> Void) {
-        withAnimation(.easeIn(duration: 0.2)) { dragOffset = CGSize(width: direction * 600, height: 40) }
-        Task {
-            try? await Task.sleep(for: .milliseconds(200))
+    /// Throws the card off-screen, carrying the finger's release speed, then runs `action`.
+    private func flyOff(direction: CGFloat, velocity: CGFloat = 0, then action: @escaping () -> Void) {
+        guard !reduceMotion else {
+            // No slide under Reduce Motion: the queue swap crossfades instead.
+            action()
+            dragOffset = .zero
+            return
+        }
+        let target = CGSize(width: direction * 600, height: dragOffset.height + 40)
+        let remaining = max(abs(target.width - dragOffset.width), 1)
+        // SwiftUI wants initial velocity relative to the distance still to travel.
+        let relativeVelocity = abs(velocity) / remaining
+        withAnimation(
+            .interpolatingSpring(duration: 0.3, bounce: 0, initialVelocity: relativeVelocity),
+            completionCriteria: .logicallyComplete
+        ) {
+            dragOffset = target
+        } completion: {
             action()
             dragOffset = .zero
         }
@@ -178,6 +223,7 @@ struct SortView: View {
             }
         }
         lastAction = SortAction(transactions: changed, rule: rule)
+        sortCount += 1
         try? context.save()
     }
 
@@ -186,12 +232,14 @@ struct SortView: View {
         transaction.kind = .transfer
         transaction.category = nil
         transaction.needsCategoryReview = false
+        sortCount += 1
         try? context.save()
     }
 
     private func undo() {
         guard let lastAction else { return }
-        withAnimation {
+        undoCount += 1
+        withAnimation(Motion.animation(Motion.standard, reduceMotion: reduceMotion)) {
             for (transaction, category, kind) in lastAction.transactions {
                 transaction.category = category
                 transaction.kind = kind
@@ -212,25 +260,28 @@ private struct SortCard: View {
     /// Horizontal drag, used to fade in the accept / choose hints.
     var swipe: CGFloat
 
+    /// 0...1 toward accepting (right) and choosing (left), for the hints and the card's wash of color.
+    private var acceptProgress: Double { Double(min(max(swipe, 0) / 110, 1)) }
+    private var chooseProgress: Double { Double(min(max(-swipe, 0) / 110, 1)) }
+
     var body: some View {
-        VStack(spacing: 18) {
+        let shape = RoundedRectangle(cornerRadius: Radius.feature, style: .continuous)
+        VStack(spacing: 16) {
             HStack {
-                hint("Choose", systemImage: "square.grid.2x2", color: .orange)
-                    .opacity(Double(max(-swipe, 0) / 110))
+                Tag("Choose", systemImage: "square.grid.2x2", color: .caution)
+                    .opacity(chooseProgress)
                 Spacer()
-                hint(suggestion.map { "Add to \($0.name)" } ?? "Choose", systemImage: "checkmark", color: themeColor)
-                    .opacity(Double(max(swipe, 0) / 110))
+                Tag(suggestion.map { "Add to \($0.name)" } ?? "Choose", systemImage: "checkmark", color: themeColor)
+                    .opacity(acceptProgress)
             }
             .frame(height: 28)
 
             Spacer(minLength: 0)
 
-            Text(transaction.amount.currency)
-                .font(.system(size: 48, weight: .bold, design: .rounded))
-                .monospacedDigit()
+            MoneyText(transaction.amount, size: 56, showsCents: true)
             VStack(spacing: 4) {
                 Text(transaction.displayName)
-                    .font(.title3.weight(.semibold))
+                    .font(.display(.title2))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                 Text([transaction.date.formatted(.dateTime.weekday(.wide).month().day()), transaction.account?.name]
@@ -242,8 +293,8 @@ private struct SortCard: View {
             Spacer(minLength: 0)
 
             if let suggestion {
-                HStack(spacing: 8) {
-                    IconBadge(systemImage: suggestion.systemImage, color: BudgyColor.named(suggestion.colorName), size: 26)
+                HStack(spacing: 10) {
+                    IconBadge(systemImage: suggestion.systemImage, color: BudgyColor.named(suggestion.colorName), size: 30)
                     Text("Looks like **\(suggestion.name)**")
                         .font(.subheadline)
                 }
@@ -258,18 +309,15 @@ private struct SortCard: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .glassEffect(.regular, in: .rect(cornerRadius: 32))
+        .background {
+            shape.fill(Color.surfaceRaised)
+            // A wash of the destination's color deepens as the card is dragged toward it.
+            shape.fill(themeColor.opacity(0.16 * acceptProgress))
+            shape.fill(Color.caution.opacity(0.14 * chooseProgress))
+        }
+        .overlay { shape.strokeBorder(Color.hairline, lineWidth: 1) }
         .accessibilityElement(children: .combine)
         .accessibilityHint("Swipe right to accept the suggestion, or use the group buttons below.")
-    }
-
-    private func hint(_ title: String, systemImage: String, color: Color) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption.weight(.bold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .foregroundStyle(color)
-            .overlay { Capsule().stroke(color, lineWidth: 2) }
     }
 }
 
@@ -301,19 +349,19 @@ private struct GroupPickerSheet: View {
                             }
                             .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.pressable)
                     }
                     Button {
                         onNotSpending()
                         dismiss()
                     } label: {
                         VStack(spacing: 8) {
-                            IconBadge(systemImage: "arrow.left.arrow.right", color: .gray, size: 48)
+                            IconBadge(systemImage: "arrow.left.arrow.right", color: .stone, size: 48)
                             Text("Not Spending").font(.caption.weight(.medium))
                         }
                         .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                 }
                 .padding()
             }

@@ -53,7 +53,8 @@ final class AdvisorService {
     private func makeSession(_ finance: FinanceContext) -> LanguageModelSession {
         let tools: [any Tool] = [
             OverviewTool(finance: finance), SpendingTool(finance: finance), GoalsTool(finance: finance),
-            RecurringTool(finance: finance), AffordabilityTool(finance: finance), RetirementTool(finance: finance)
+            RecurringTool(finance: finance), AffordabilityTool(finance: finance), RetirementTool(finance: finance),
+            CreditTool(finance: finance), SavingsPlanTool(finance: finance)
         ]
         let instructions = """
         You are Budgy, a friendly, encouraging personal finance advisor inside the user's budgeting app. \
@@ -62,7 +63,10 @@ final class AdvisorService {
         Budgy budgets on a conservative base paycheck; overtime is extra. Safe to Spend already sets aside bills, \
         subscriptions, Roth IRA deposits, credit card balances, and goal contributions. \
         Money moves are suggestions only; the app never moves money. You are not a licensed financial advisor, \
-        so for taxes or investments suggest checking with a professional when it matters.
+        so for taxes or investments suggest checking with a professional when it matters. \
+        Credit: utilization is reported when the statement closes, not on the due date; each card counts on its own and overall. \
+        Never promise a specific score change, never suggest closing old cards or opening new credit to build credit mix. \
+        For "where should my money go", follow getSavingsPlan's order. Suggest low-cost index funds as a category, never specific stocks or funds.
         \(finance.briefing)
         """
         if Self.prefersPrivateCloudCompute, PrivateCloudComputeLanguageModel().isAvailable {
@@ -197,7 +201,7 @@ struct AdvisorView: View {
     private func welcome(usingPCC: Bool) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Image(systemName: "sparkles")
-                .font(.system(size: 36, weight: .semibold))
+                .scaledFont(size: 36, weight: .semibold)
                 .foregroundStyle(.tint)
             Text("Hi! I know your accounts, budget, goals, and subscriptions. What would you like to figure out?")
                 .font(.title3.weight(.medium))
@@ -211,6 +215,7 @@ struct AdvisorView: View {
                 Label("Plan my paycheck", systemImage: "wand.and.stars").frame(maxWidth: .infinity)
             }
             .buttonStyle(.glassProminent)
+            .foregroundStyle(.white)
             .controlSize(.large)
 
             ForEach(suggestions, id: \.self) { suggestion in
@@ -240,6 +245,7 @@ struct AdvisorView: View {
                 .labelStyle(.iconOnly)
                 .font(.headline)
                 .buttonStyle(.glassProminent)
+                .foregroundStyle(.white)
                 .buttonBorderShape(.circle)
                 .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || advisor.isResponding)
         }
@@ -265,10 +271,10 @@ private struct MessageBubble: View {
                 .font(.body)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .foregroundStyle(message.role == .user ? .white : (message.role == .error ? .red : .primary))
+                .foregroundStyle(message.role == .user ? .white : (message.role == .error ? .clay : .primary))
                 .background {
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(message.role == .user ? AnyShapeStyle(themeColor.gradient) : AnyShapeStyle(.background.secondary))
+                        .fill(message.role == .user ? AnyShapeStyle(themeColor) : AnyShapeStyle(Color.surface))
                 }
                 .textSelection(.enabled)
             if message.role != .user { Spacer(minLength: 40) }
@@ -299,6 +305,7 @@ private struct PlanCard: View {
             }
             Button(applied ? "Applied ✓" : "Apply to My Goals") { apply() }
                 .buttonStyle(.glassProminent)
+                .foregroundStyle(.white)
                 .disabled(applied)
                 .frame(maxWidth: .infinity)
         }

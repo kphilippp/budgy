@@ -27,8 +27,11 @@ final class NotificationService {
         var requests: [UNNotificationRequest] = []
 
         for item in recurring where item.isActive && !item.needsReview && item.kind != .payYourselfFirst {
+            // Yearly and quarterly renewals are big, easy-to-forget charges; give a week to cancel.
+            let isLongCycle = item.kind == .subscription && (item.frequency == .yearly || item.frequency == .quarterly)
+            let leadDays = isLongCycle ? max(item.remindDaysBefore, 7) : item.remindDaysBefore
             for due in item.upcomingDueDates(through: horizon) {
-                guard let fireDate = Calendar.current.date(byAdding: .day, value: -item.remindDaysBefore, to: due),
+                guard let fireDate = Calendar.current.date(byAdding: .day, value: -leadDays, to: due),
                       let remindAt = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: fireDate),
                       remindAt > .now else { continue }
                 let content = UNMutableNotificationContent()
@@ -42,11 +45,42 @@ final class NotificationService {
             }
         }
 
+        for card in engine.includedAccounts where card.kind == .creditCard {
+            if card.utilizationPaymentNeeded > 0,
+               let statementDate = card.nextStatementClosingDate(),
+               statementDate <= horizon,
+               let reminderDay = Calendar.current.date(byAdding: .day, value: -3, to: statementDate),
+               let remindAt = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: reminderDay),
+               remindAt > .now {
+                let content = UNMutableNotificationContent()
+                content.title = "Lower \(card.name) utilization"
+                content.body = "Pay \(card.utilizationPaymentNeeded.currency) before the statement closes on \(statementDate.formatted(.dateTime.month().day())) to report below 30%."
+                content.sound = .default
+                requests.append(request(id: "\(prefix)card.statement.\(card.id)", content: content, at: remindAt))
+            }
+
+            if card.balance > 0,
+               let dueDate = card.nextPaymentDueDate(),
+               dueDate <= horizon,
+               let reminderDay = Calendar.current.date(byAdding: .day, value: -3, to: dueDate),
+               let remindAt = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: reminderDay),
+               remindAt > .now {
+                let content = UNMutableNotificationContent()
+                content.title = "Pay \(card.name) in full"
+                content.body = "Your \(card.balance.currency) balance is due \(dueDate.formatted(.dateTime.month().day())). Pay the statement balance in full to avoid interest."
+                content.sound = .default
+                requests.append(request(id: "\(prefix)card.due.\(card.id)", content: content, at: remindAt))
+            }
+        }
+
         let payday = engine.nextPayday
         if let remindAt = Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: payday), remindAt > .now {
             let content = UNMutableNotificationContent()
-            content.title = "It's payday 🎉"
-            content.body = "Open Budgy to see your new Safe to Spend and fund your goals."
+            let savingsAmount = engine.basePaycheck * (engine.schedule?.savingsRate ?? 0)
+            content.title = savingsAmount > 0 ? "Pay yourself first" : "It's payday 🎉"
+            content.body = savingsAmount > 0
+                ? "Move \(savingsAmount.currency) to savings or investments before you spend the rest."
+                : "Open Budgy to see your new Safe to Spend and fund your goals."
             content.sound = .default
             requests.append(request(id: "\(prefix)payday", content: content, at: remindAt))
         }

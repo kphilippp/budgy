@@ -16,24 +16,26 @@ struct BudgetView: View {
                         PeriodNavigator(period: breakdown.period, offset: $offset)
 
                         if breakdown.paydayCount > engine.paychecksPerMonth {
-                            Label("Extra paycheck this month! It isn't in your budget, so it's bonus money for a goal.", systemImage: "gift.fill")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.green)
-                                .card(padding: 14)
+                            HStack(spacing: 12) {
+                                IconBadge(systemImage: "gift.fill", color: .positive, size: 34)
+                                Text("Extra paycheck this month. It isn't in your budget, so it's bonus money for a goal.")
+                                    .font(.subheadline)
+                            }
+                            .card(padding: 14)
                         }
 
                         BudgetSummaryCard(breakdown: breakdown, base: engine.basePaycheck, paychecks: engine.paychecksPerMonth, isOverridden: (engine.schedule?.monthlyIncomeOverride ?? 0) > 0)
                         WaterfallChart(breakdown: breakdown)
 
-                        LineSection(title: "Pay Yourself First", lines: breakdown.payYourselfFirst, color: .green)
-                        LineSection(title: "Bills", lines: breakdown.bills, color: .orange)
-                        LineSection(title: "Subscriptions", lines: breakdown.subscriptions, color: .purple)
+                        LineSection(title: "Pay yourself first", lines: breakdown.payYourselfFirst, color: .moss)
+                        LineSection(title: "Bills", lines: breakdown.bills, color: .ochre)
+                        LineSection(title: "Subscriptions", lines: breakdown.subscriptions, color: .heather)
 
                         NavigationLink {
                             SubscriptionsView(embedded: true)
                         } label: {
                             HStack(spacing: 12) {
-                                IconBadge(systemImage: "repeat.circle.fill", color: .purple, size: 34)
+                                IconBadge(systemImage: "repeat.circle.fill", color: .heather, size: 34)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Bills & Subscriptions").font(.headline)
                                     Text("Manage recurring charges and Pay Yourself First").font(.caption).foregroundStyle(.secondary)
@@ -43,8 +45,8 @@ struct BudgetView: View {
                             }
                             .card(padding: 14)
                         }
-                        .buttonStyle(.plain)
-                        LineSection(title: "Goals", lines: breakdown.goals, color: .pink)
+                        .buttonStyle(.pressable)
+                        LineSection(title: "Goals", lines: breakdown.goals, color: .rosehip)
 
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
@@ -73,7 +75,7 @@ struct BudgetView: View {
                     .padding(.horizontal)
                     .padding(.bottom, 24)
                 }
-                .background(Color(.systemGroupedBackground))
+                .budgyCanvas()
             }
             .navigationTitle("Budget")
             .budgyToolbar()
@@ -102,7 +104,7 @@ private struct PeriodNavigator: View {
                 .labelStyle(.iconOnly)
             Spacer()
             VStack(spacing: 2) {
-                Text(title).font(.headline)
+                Text(title).font(.display(.title3))
                 Text(offset == 0 ? "This budget month" : (offset < 0 ? "Past" : "Upcoming"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -122,73 +124,93 @@ private struct BudgetSummaryCard: View {
     var paychecks: Int
     var isOverridden: Bool
 
+    private struct Segment: Identifiable {
+        var id: String { name }
+        var name: String
+        var amount: Double
+        var color: Color
+    }
+
+    private var segments: [Segment] {
+        [
+            Segment(name: "Saved", amount: breakdown.payYourselfFirstTotal, color: .moss),
+            Segment(name: "Bills", amount: breakdown.billsTotal, color: .ochre),
+            Segment(name: "Subscriptions", amount: breakdown.subscriptionsTotal, color: .heather),
+            Segment(name: "Goals", amount: breakdown.goalsTotal, color: .rosehip),
+            Segment(name: "Spent", amount: breakdown.categorySpentTotal, color: .lake),
+            Segment(name: "Left", amount: max(breakdown.leftOver, 0), color: Color.ink.opacity(0.12))
+        ].filter { $0.amount > 0 }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Monthly income")
                         .font(.subheadline).foregroundStyle(.secondary)
-                    Text(breakdown.income.currencyWhole)
-                        .font(.system(.title, design: .rounded).weight(.bold))
-                    Text(isOverridden ? "Set in Settings" : "Base paycheck \(base.currencyWhole) × \(paychecks)")
+                    MoneyText(breakdown.income, size: 38)
+                    Text(isOverridden ? "Set in Settings" : "\(base.currencyWhole) × \(paychecks) paychecks")
                         .font(.caption).foregroundStyle(.secondary)
                     if breakdown.actualIncome > 0 {
-                        Text("Received so far: \(breakdown.actualIncome.currencyWhole)")
+                        Text("\(breakdown.actualIncome.currencyWhole) received so far")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("Left over").font(.subheadline).foregroundStyle(.secondary)
-                    Text(breakdown.leftOver.currencyWhole)
-                        .font(.system(.title, design: .rounded).weight(.bold))
-                        .foregroundStyle(breakdown.leftOver >= 0 ? .green : .red)
+                    MoneyText(breakdown.leftOver, size: 38)
+                        .foregroundStyle(breakdown.leftOver >= 0 ? .positive : .negative)
                     Text("Plan: \(breakdown.plannedLeftOver.currencyWhole)")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
 
-            // Proportional bar of where the money goes.
+            // Where the month's money goes, as separate soft segments.
             GeometryReader { proxy in
-                let total = max(breakdown.income, breakdown.fixedTotal + breakdown.categorySpentTotal, 1)
-                let segments: [(Double, Color)] = [
-                    (breakdown.payYourselfFirstTotal, .green),
-                    (breakdown.billsTotal, .orange),
-                    (breakdown.subscriptionsTotal, .purple),
-                    (breakdown.goalsTotal, .pink),
-                    (breakdown.categorySpentTotal, .blue),
-                    (max(breakdown.leftOver, 0), .gray.opacity(0.3))
-                ]
-                HStack(spacing: 2) {
-                    ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
-                        if segment.0 > 0 {
-                            Rectangle()
-                                .fill(segment.1.gradient)
-                                .frame(width: max(proxy.size.width * segment.0 / total - 2, 2))
-                        }
+                let total = max(segments.reduce(0) { $0 + $1.amount }, 1)
+                let gap: CGFloat = 3
+                let usable = proxy.size.width - gap * CGFloat(max(segments.count - 1, 0))
+                HStack(spacing: gap) {
+                    ForEach(segments) { segment in
+                        Capsule()
+                            .fill(segment.color)
+                            .frame(width: max(usable * segment.amount / total, 4))
                     }
                 }
-                .clipShape(.capsule)
             }
-            .frame(height: 14)
+            .frame(height: 10)
             .accessibilityHidden(true)
 
-            HStack(spacing: 14) {
-                legend("Roth", .green)
-                legend("Bills", .orange)
-                legend("Subs", .purple)
-                legend("Goals", .pink)
-                legend("Spent", .blue)
-            }
-            .font(.caption2)
+            FlowLegend(items: segments.filter { $0.name != "Left" }.map { ($0.name, $0.color) })
         }
-        .card()
+        .padding(.top, 4)
+    }
+}
+
+/// Small dot-and-label legend that wraps onto a second line when it needs to.
+private struct FlowLegend: View {
+    var items: [(String, Color)]
+
+    var body: some View {
+        ViewThatFits {
+            HStack(spacing: 14) { allEntries }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 14) { entries(items.prefix(3)) }
+                HStack(spacing: 14) { entries(items.dropFirst(3)) }
+            }
+        }
+        .font(.caption)
     }
 
-    private func legend(_ title: String, _ color: Color) -> some View {
-        HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 7, height: 7)
-            Text(title).foregroundStyle(.secondary)
+    private var allEntries: some View { entries(items[...]) }
+
+    private func entries(_ slice: ArraySlice<(String, Color)>) -> some View {
+        ForEach(Array(slice.enumerated()), id: \.offset) { _, item in
+            HStack(spacing: 5) {
+                Circle().fill(item.1).frame(width: 7, height: 7)
+                Text(item.0).foregroundStyle(.secondary)
+            }
         }
     }
 }
@@ -210,23 +232,23 @@ private struct WaterfallChart: View {
         var running = breakdown.income
         var result = [Step(name: "Pay", start: 0, end: running, color: themeColor)]
         let parts: [(String, Double, Color)] = [
-            ("Roth", breakdown.payYourselfFirstTotal, .green),
-            ("Bills", breakdown.billsTotal, .orange),
-            ("Subs", breakdown.subscriptionsTotal, .purple),
-            ("Goals", breakdown.goalsTotal, .pink),
-            ("Spent", breakdown.categorySpentTotal, .blue)
+            ("Saved", breakdown.payYourselfFirstTotal, .moss),
+            ("Bills", breakdown.billsTotal, .ochre),
+            ("Subs", breakdown.subscriptionsTotal, .heather),
+            ("Goals", breakdown.goalsTotal, .rosehip),
+            ("Spent", breakdown.categorySpentTotal, .lake)
         ]
         for part in parts {
             result.append(Step(name: part.0, start: running - part.1, end: running, color: part.2))
             running -= part.1
         }
-        result.append(Step(name: "Left", start: min(running, 0), end: max(running, 0), color: running >= 0 ? .mint : .red))
+        result.append(Step(name: "Left", start: min(running, 0), end: max(running, 0), color: running >= 0 ? .sage : .negative))
         return result
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionHeader(title: "Where It Goes")
+            SectionHeader(title: "Where it goes")
             Chart(steps) { step in
                 BarMark(
                     x: .value("Step", step.name),
@@ -234,17 +256,22 @@ private struct WaterfallChart: View {
                     yEnd: .value("To", step.end),
                     width: .ratio(0.62)
                 )
-                .foregroundStyle(step.color.gradient)
-                .cornerRadius(6)
+                .foregroundStyle(step.color)
+                .cornerRadius(8)
                 .annotation(position: .top, spacing: 4) {
-                    Text(abs(step.end - step.start).currencyWhole)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
+                    if abs(step.end - step.start) >= 1 {
+                        Text(abs(step.end - step.start).currencyWhole)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                    }
                 }
+            }
+            .chartXAxis {
+                AxisMarks { _ in AxisValueLabel() }
             }
             .chartYAxis {
                 AxisMarks(position: .leading) { value in
-                    AxisGridLine()
+                    AxisGridLine().foregroundStyle(Color.hairline)
                     AxisValueLabel {
                         if let amount = value.as(Double.self) { Text(amount.currencyWhole) }
                     }
@@ -273,7 +300,7 @@ private struct LineSection: View {
                             Spacer()
                             if line.actual > 0 {
                                 Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
+                                    .foregroundStyle(.positive)
                                     .accessibilityLabel("Paid")
                             }
                             Text(line.planned.currency).font(.subheadline.monospacedDigit())
@@ -301,7 +328,7 @@ struct CategoryBudgetRow: View {
                         let left = line.planned - line.actual
                         Text(left >= 0 ? "\(left.currencyWhole) left" : "\(abs(left).currencyWhole) over")
                             .font(.caption)
-                            .foregroundStyle(left >= 0 ? AnyShapeStyle(.secondary) : AnyShapeStyle(.red))
+                            .foregroundStyle(left >= 0 ? AnyShapeStyle(.secondary) : AnyShapeStyle(.clay))
                     }
                 }
             }
@@ -340,49 +367,53 @@ struct CategoryEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    HStack {
-                        IconBadge(systemImage: systemImage, color: BudgyColor.named(colorName), size: 44)
-                        TextField("Group name", text: $name).font(.title3)
-                    }
-                }
-                Section {
-                    LabeledContent("Per month") {
-                        TextField("Amount", value: $budget, format: .currency(code: "USD"))
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                    }
-                } header: {
-                    Text("Budget")
-                } footer: {
-                    Text("About \((budget / 30).currencyWhole) a day over a budget month.")
-                }
-                Section("Icon") {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
-                        ForEach(Self.icons, id: \.self) { icon in
-                            Button {
-                                systemImage = icon
-                            } label: {
-                                IconBadge(systemImage: icon, color: icon == systemImage ? BudgyColor.named(colorName) : .gray.opacity(0.5), size: 38)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(icon)
-                        }
-                    }
-                }
-                Section("Color") {
-                    ColorPickerRow(selection: $colorName)
-                }
-                if let category {
+                Group {
                     Section {
-                        Button("Delete Group", role: .destructive) {
-                            category.deleteGroup(context: context)
-                            try? context.save()
-                            dismiss()
+                        HStack {
+                            IconBadge(systemImage: systemImage, color: BudgyColor.named(colorName), size: 44)
+                            TextField("Group name", text: $name).font(.title3)
+                        }
+                    }
+                    Section {
+                        LabeledContent("Per month") {
+                            TextField("Amount", value: $budget, format: .currency(code: "USD"))
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    } header: {
+                        Text("Budget")
+                    } footer: {
+                        Text("About \((budget / 30).currencyWhole) a day over a budget month.")
+                    }
+                    Section("Icon") {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
+                            ForEach(Self.icons, id: \.self) { icon in
+                                Button {
+                                    systemImage = icon
+                                } label: {
+                                    IconBadge(systemImage: icon, color: icon == systemImage ? BudgyColor.named(colorName) : .stone.opacity(0.5), size: 38)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(icon)
+                            }
+                        }
+                    }
+                    Section("Color") {
+                        ColorPickerRow(selection: $colorName)
+                    }
+                    if let category {
+                        Section {
+                            Button("Delete Group", role: .destructive) {
+                                category.deleteGroup(context: context)
+                                try? context.save()
+                                dismiss()
+                            }
                         }
                     }
                 }
+                .budgyRows()
             }
+            .budgyList()
             .navigationTitle(category == nil ? "New Group" : "Edit Group")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -417,17 +448,18 @@ struct ColorPickerRow: View {
                 Button {
                     selection = name
                 } label: {
-                    Circle()
-                        .fill(BudgyColor.named(name).gradient)
+                    Pebble(seed: name.stableHash)
+                        .fill(BudgyColor.named(name))
                         .frame(width: 32, height: 32)
                         .overlay {
-                            if selection == name {
-                                Image(systemName: "checkmark").font(.caption.weight(.bold)).foregroundStyle(.white)
-                            }
+                            Pebble(seed: name.stableHash)
+                                .stroke(Color.ink.opacity(selection == name ? 0.7 : 0), lineWidth: 2)
+                                .padding(-5)
                         }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(name)
+                .accessibilityAddTraits(selection == name ? .isSelected : [])
             }
         }
     }

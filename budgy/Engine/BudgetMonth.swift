@@ -3,6 +3,21 @@ import Foundation
 /// The monthly budget, which runs from the day you pay your credit card off to the same day next month.
 struct MonthlySpendResult {
     var period: PayPeriod
+    var safeUntilDate: Date
+    /// Current included checking and savings cash.
+    var cash: Double
+    /// Current balances owed across included credit cards.
+    var cardOwed: Double
+    /// Unpaid bills, subscriptions, and Pay Yourself First transfers remaining in the period.
+    var upcoming: Double
+    var billReserve: Double
+    var plannedSavings: Double
+    /// Base pay expected before the end of the period.
+    var expectedIncome: Double
+    /// Goal contributions still reserved before the end of the period.
+    var goalReserve: Double
+    /// Cash deliberately left untouched in checking.
+    var checkingBuffer: Double
     var income: Double
     var incomeIsEstimated: Bool
     var bills: Double
@@ -15,13 +30,12 @@ struct MonthlySpendResult {
     var scheduled: [UpcomingCharge]
 
     var fixedTotal: Double { bills + subscriptions + payYourselfFirst + goals }
-    /// What you can spend on everyday things this budget month.
-    var available: Double { income - fixedTotal }
-    var left: Double { available - spent }
+    /// Cash left after paying cards and remaining commitments, including expected base pay.
+    var left: Double { cash - cardOwed - upcoming - goalReserve - checkingBuffer + expectedIncome }
 
     var daysRemaining: Int {
         let calendar = Calendar.current
-        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: .now), to: period.end).day ?? 0
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: .now), to: safeUntilDate).day ?? 0
         return max(days, 1)
     }
 
@@ -42,7 +56,7 @@ extension FinanceEngine {
 
     /// The day of the month you usually pay your card off, from your card payments.
     var detectedBudgetCycleDay: Int? {
-        let payments = transactions
+        let payments = includedTransactions
             .filter { $0.kind == .creditCardPayment && $0.amount > 0 }
             .sorted { $0.date > $1.date }
             .prefix(6)
@@ -57,7 +71,7 @@ extension FinanceEngine {
     var budgetCycleDay: Int {
         if let day = schedule?.budgetCycleDay, day > 0 { return day }
         if let detected = detectedBudgetCycleDay { return detected }
-        if let due = accounts.first(where: { $0.kind == .creditCard && $0.paymentDueDay > 0 })?.paymentDueDay { return due }
+        if let due = includedAccounts.first(where: { $0.kind == .creditCard && $0.paymentDueDay > 0 })?.paymentDueDay { return due }
         return 1
     }
 
@@ -121,12 +135,22 @@ extension FinanceEngine {
             .reduce(0) { $0 + $1.contributionPerPaycheck * Double(paychecksPerMonth) }
 
         let end = min(period.end, calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? period.end)
-        let spent = transactions
+        let spent = includedTransactions
             .filter { $0.date >= period.start && $0.date < end && $0.recurringItem == nil }
             .reduce(0) { $0 + $1.spendingAmount }
+        let safe = safeToSpend()
 
         return MonthlySpendResult(
             period: period,
+            safeUntilDate: safe.untilDate,
+            cash: safe.cash,
+            cardOwed: safe.cardOwed,
+            upcoming: safe.upcomingTotal,
+            billReserve: safe.billReserve,
+            plannedSavings: safe.savingsReserve,
+            expectedIncome: safe.expectedIncome,
+            goalReserve: safe.goalReserve,
+            checkingBuffer: safe.checkingBuffer,
             income: monthlyIncome,
             incomeIsEstimated: (schedule?.monthlyIncomeOverride ?? 0) <= 0,
             bills: totals[.bill] ?? 0,

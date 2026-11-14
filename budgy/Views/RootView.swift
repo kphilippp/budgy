@@ -23,7 +23,7 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     }
 }
 
-enum AppTab: Hashable {
+enum AppTab: String, Hashable {
     case home, budget, sort, goals, accounts
 }
 
@@ -48,20 +48,20 @@ struct RootView: View {
                     .transition(.opacity)
             } else {
             TabView(selection: $navigation.selectedTab) {
-                Tab("Home", systemImage: "house.fill", value: .home) {
+                Tab("Today", systemImage: "sun.horizon", value: .home) {
                     HomeView()
                 }
-                Tab("Budget", systemImage: "chart.bar.doc.horizontal.fill", value: .budget) {
+                Tab("Budget", systemImage: "chart.pie", value: .budget) {
                     BudgetView()
                 }
-                Tab("Sort", systemImage: "rectangle.stack.fill", value: .sort) {
+                Tab("Sort", systemImage: "square.stack", value: .sort) {
                     SortView()
                 }
                 .badge(unsorted.count)
-                Tab("Goals", systemImage: "target", value: .goals) {
+                Tab("Goals", systemImage: "mountain.2", value: .goals) {
                     GoalsView()
                 }
-                Tab("Accounts", systemImage: "building.columns.fill", value: AppTab.accounts) {
+                Tab("Accounts", systemImage: "building.columns", value: AppTab.accounts) {
                     AccountsView()
                 }
             }
@@ -74,33 +74,53 @@ struct RootView: View {
                     .transition(.opacity)
             }
         }
-        .animation(.smooth, value: lock.isUnlocked)
-        .animation(.smooth, value: accounts.hasCompletedOnboarding)
+        .animation(Motion.gentle, value: lock.isUnlocked)
+        .animation(Motion.gentle, value: accounts.hasCompletedOnboarding)
+        // Mineral ink instead of pure black/white; `.secondary` and `.tertiary` derive from it.
+        .foregroundStyle(.ink)
         .tint(theme.color)
         .environment(\.themeColor, theme.color)
         .preferredColorScheme(appearance.colorScheme)
+        #if DEBUG
+        // `-BudgyTab budget` (any AppTab) opens that tab, for screenshots and design review.
+        .onAppear {
+            if let raw = UserDefaults.standard.string(forKey: "BudgyTab"), let tab = AppTab(rawValue: raw) {
+                navigation.selectedTab = tab
+            }
+        }
+        #endif
     }
 }
 
 /// Covers the app until Face ID succeeds.
 private struct LockScreen: View {
     @Environment(BiometricLock.self) private var lock
+    @Environment(\.themeColor) private var themeColor
 
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 44, weight: .semibold))
-                .foregroundStyle(.tint)
-            Text("Budgy is locked")
-                .font(.title2.weight(.semibold))
-            Button("Unlock with Face ID") {
+        VStack(spacing: 18) {
+            Spacer()
+            IconBadge(systemImage: "lock.fill", color: themeColor, size: 76)
+            Text("Budgy")
+                .font(.display(.largeTitle))
+            Text("Locked to keep your money private.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
                 Task { await lock.unlock() }
+            } label: {
+                Label("Unlock with Face ID", systemImage: "faceid")
+                    .frame(maxWidth: .infinity)
             }
             .buttonStyle(.glassProminent)
+            .foregroundStyle(.white)
             .controlSize(.large)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.ultraThinMaterial)
+        .background { BudgyBackground() }
     }
 }
 

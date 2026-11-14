@@ -24,6 +24,8 @@ final class Account {
     var creditLimit: Double = 0
     /// Day of month the card payment is due, 1-31. Zero means unknown.
     var paymentDueDay: Int = 0
+    /// Day of month the statement closes and utilization is reported. Zero means unknown.
+    var statementClosingDay: Int = 0
     /// Statement balance if you know it; otherwise the full balance is used.
     var statementBalance: Double = 0
 
@@ -58,13 +60,33 @@ final class Account {
 
     /// The next date this card's payment is due, if a due day is set.
     func nextPaymentDueDate(after date: Date = .now, calendar: Calendar = .current) -> Date? {
-        guard kind == .creditCard, (1...31).contains(paymentDueDay) else { return nil }
+        nextCardDate(day: paymentDueDay, after: date, calendar: calendar)
+    }
+
+    /// The next statement closing date, when the balance is commonly reported to bureaus.
+    func nextStatementClosingDate(after date: Date = .now, calendar: Calendar = .current) -> Date? {
+        nextCardDate(day: statementClosingDay, after: date, calendar: calendar)
+    }
+
+    var utilization: Double {
+        guard kind == .creditCard, creditLimit > 0 else { return 0 }
+        return balance / creditLimit
+    }
+
+    /// Pays slightly below 30% so rounding or a small pending charge does not report at the limit.
+    var utilizationPaymentNeeded: Double {
+        guard kind == .creditCard, creditLimit > 0 else { return 0 }
+        return max(balance - creditLimit * 0.29, 0)
+    }
+
+    private func nextCardDate(day: Int, after date: Date, calendar: Calendar) -> Date? {
+        guard kind == .creditCard, (1...31).contains(day) else { return nil }
         let today = calendar.startOfDay(for: date)
         for monthOffset in 0...1 {
             guard let month = calendar.date(byAdding: .month, value: monthOffset, to: today) else { continue }
             var parts = calendar.dateComponents([.year, .month], from: month)
             let daysInMonth = calendar.range(of: .day, in: .month, for: month)?.count ?? 28
-            parts.day = min(paymentDueDay, daysInMonth)
+            parts.day = min(day, daysInMonth)
             if let due = calendar.date(from: parts), due >= today { return due }
         }
         return nil
@@ -202,6 +224,8 @@ final class RecurringItem {
     var remindDaysBefore: Int = 2
     var lastChargedDate: Date?
     var isSample: Bool = false
+    /// When you switched this off, so Budgy can catch charges that continue after cancelling.
+    var cancelledAt: Date?
 
     /// For Pay Yourself First: the account the money goes to (e.g. Roth IRA).
     var destinationAccountID: UUID?
@@ -356,6 +380,12 @@ final class PaySchedule {
     var budgetCycleDay: Int = 0
     /// If set (> 0), use this as monthly income instead of the amount estimated from paychecks.
     var monthlyIncomeOverride: Double = 0
+    /// Cash kept untouched in checking when calculating Safe to Spend.
+    var checkingBuffer: Double = 500
+    /// Portion of each base paycheck to move to savings or investments first.
+    var savingsRate: Double = 0.33
+    /// The most recent paycheck whose savings transfer the user confirmed.
+    var lastSavingsTransferPaycheckID: UUID?
 
     var frequency: Frequency {
         get { Frequency(rawValue: frequencyRaw) ?? .biweekly }

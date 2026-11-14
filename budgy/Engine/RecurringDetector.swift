@@ -38,10 +38,11 @@ struct RecurringDetector {
             if existing.contains(where: { matches(key: key, item: $0) }) { continue }
 
             let sorted = group.sorted { $0.date < $1.date }
-            let amounts = sorted.map(\.amount).sorted()
-            let median = amounts[amounts.count / 2]
-            // Amounts should be steady (within 20% of the median).
-            guard sorted.allSatisfy({ abs($0.amount - median) <= median * 0.2 }) else { continue }
+            let median = Self.median(sorted.map(\.amount))
+            // Amounts should be steady (within 20% of the median), or show one step up:
+            // a price increase is something to flag, not a reason to miss the subscription.
+            let priceStep = Self.priceStep(in: sorted)
+            guard sorted.allSatisfy({ abs($0.amount - median) <= median * 0.2 }) || priceStep != nil else { continue }
 
             let gaps = zip(sorted.dropFirst(), sorted).map { $0.date.timeIntervalSince($1.date) / 86_400 }
             let medianGap = gaps.sorted()[gaps.count / 2]
@@ -59,11 +60,29 @@ struct RecurringDetector {
             let isKnownSubscription = Self.knownSubscriptions.contains { lowered.contains($0) }
             let isBill = !isKnownSubscription && (Self.knownBills.contains { lowered.contains($0) } || median > 250)
             let kind: RecurringKind = last.kind == .contribution ? .payYourselfFirst : (isBill ? .bill : .subscription)
-            let previous = sorted.dropLast().last { abs($0.amount - last.amount) > 0.009 }?.amount
+            let previous = priceStep ?? sorted.dropLast().last { abs($0.amount - last.amount) > 0.009 }?.amount
             candidates.append(Candidate(name: last.displayName, merchantKey: key, amount: last.amount, frequency: frequency,
                                         lastDate: last.date, kind: kind, previousAmount: previous.flatMap { $0 < last.amount ? $0 : nil }))
         }
         return candidates
+    }
+
+    private static func median(_ values: [Double]) -> Double {
+        let sorted = values.sorted()
+        return sorted.isEmpty ? 0 : sorted[sorted.count / 2]
+    }
+
+    /// If the charges are steady, then jump once to a new steady higher price (up to double),
+    /// returns the old price. Needs at least two charges at the old price.
+    private static func priceStep(in sorted: [Transaction]) -> Double? {
+        guard let latest = sorted.last?.amount, latest > 0 else { return nil }
+        let atNewPrice = sorted.reversed().prefix { abs($0.amount - latest) <= latest * 0.05 }.count
+        let before = sorted.dropLast(atNewPrice).map(\.amount)
+        guard before.count >= 2 else { return nil }
+        let oldPrice = median(before)
+        guard before.allSatisfy({ abs($0 - oldPrice) <= oldPrice * 0.05 }),
+              latest > oldPrice * 1.05, latest <= oldPrice * 2 else { return nil }
+        return oldPrice
     }
 
     func matches(key: String, item: RecurringItem) -> Bool {

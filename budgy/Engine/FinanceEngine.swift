@@ -21,10 +21,13 @@ struct SafeToSpendResult {
     var expectedIncome: Double
     var paydaysBeforeDate: Int
     var goalReserve: Double
+    var checkingBuffer: Double
 
-    var upcomingTotal: Double { upcoming.filter { $0.source != .creditCard && $0.source != .goal }.reduce(0) { $0 + $1.amount } }
+    var upcomingTotal: Double { billReserve }
+    var billReserve: Double { upcoming.filter { $0.source == .bill || $0.source == .subscription }.reduce(0) { $0 + $1.amount } }
+    var savingsReserve: Double { goalReserve }
 
-    var amount: Double { cash - cardOwed - upcomingTotal - goalReserve + expectedIncome }
+    var amount: Double { cash - cardOwed - upcomingTotal - goalReserve - checkingBuffer + expectedIncome }
 
     var daysRemaining: Int {
         let calendar = Calendar.current
@@ -88,6 +91,13 @@ struct FinanceEngine {
     var now: Date = .now
     var calendar: Calendar = .current
 
+    /// Accounts and transactions the user has chosen to include in Budgy.
+    var includedAccounts: [Account] { accounts.filter { !$0.isHidden } }
+
+    var includedTransactions: [Transaction] {
+        transactions.filter { $0.account?.isHidden != true }
+    }
+
     // MARK: Paychecks
 
     var payCycle: PayCycle {
@@ -99,19 +109,17 @@ struct FinanceEngine {
     var nextPayday: Date { currentPeriod.end }
 
     var paychecks: [Transaction] {
-        transactions.filter { $0.kind == .income }.sorted { $0.date > $1.date }
+        includedTransactions.filter { $0.kind == .income }.sorted { $0.date > $1.date }
     }
 
-    /// A conservative "normal" paycheck: the lower quartile of your last 6 checks,
-    /// so overtime spikes don't inflate your budget.
+    /// The onboarding estimate is the initial base. Any lower paycheck seen later
+    /// becomes the new base, while larger checks remain extra pay.
     var basePaycheck: Double {
         if let schedule, schedule.baseAmountOverride > 0 { return schedule.baseAmountOverride }
-        let recent = paychecks.prefix(6).map { -$0.amount }.filter { $0 > 0 }.sorted()
-        if recent.count >= 3 {
-            let index = Int((Double(recent.count - 1) * 0.25).rounded(.down))
-            return recent[index]
-        }
-        return schedule?.estimatedAmount ?? recent.last ?? 0
+        let detected = paychecks.map { -$0.amount }.filter { $0 > 0 }.min()
+        let provided = schedule?.estimatedAmount ?? 0
+        if provided > 0, let detected { return min(provided, detected) }
+        return detected ?? provided
     }
 
     /// Paychecks with pay above your base that you haven't assigned yet.
@@ -126,6 +134,16 @@ struct FinanceEngine {
                 let extra = -paycheck.amount - base
                 return extra >= threshold ? (paycheck, extra.rounded(toPlaces: 2)) : nil
             }
+    }
+
+    var savingsTransferDue: (paycheck: Transaction, amount: Double)? {
+        guard let schedule,
+              schedule.savingsRate > 0,
+              let paycheck = paychecks.first,
+              currentPeriod.contains(paycheck.date),
+              schedule.lastSavingsTransferPaycheckID != paycheck.id else { return nil }
+        let amount = basePaycheck * min(max(schedule.savingsRate, 0), 1)
+        return amount > 0 ? (paycheck, amount.rounded(toPlaces: 2)) : nil
     }
 
     // MARK: Safe to Spend
@@ -169,7 +187,14 @@ struct FinanceEngine {
         let futurePaydays = payCycle.paydays(from: calendar.date(byAdding: .day, value: 1, to: today) ?? today, to: until)
         let goalPerPaycheck = goals.filter { !$0.isArchived && !$0.isComplete }.reduce(0) { $0 + $1.contributionPerPaycheck }
         let currentGoalReserve = unfundedGoalsThisPeriod.reduce(0) { $0 + $1.contributionPerPaycheck }
-        let goalReserve = currentGoalReserve + goalPerPaycheck * Double(futurePaydays.count)
+        let savingsTransferReserve = savingsTransferDue?.amount ?? 0
+        let payYourselfFirstReserve = upcoming
+            .filter { $0.source == .payYourselfFirst }
+            .reduce(0) { $0 + $1.amount }
+        let savingsRateReserve = basePaycheck * (schedule?.savingsRate ?? 0)
+        let currentSavingsReserve = max(currentGoalReserve + payYourselfFirstReserve, savingsTransferReserve)
+        let futureSavingsReserve = max(goalPerPaycheck, savingsRateReserve) * Double(futurePaydays.count)
+        let goalReserve = currentSavingsReserve + futureSavingsReserve
 
         for goal in unfundedGoalsThisPeriod {
             upcoming.append(UpcomingCharge(name: goal.name, amount: goal.contributionPerPaycheck, date: today, source: .goal, systemImage: goal.systemImage))
@@ -182,7 +207,8 @@ struct FinanceEngine {
             upcoming: upcoming.sorted { $0.date < $1.date },
             expectedIncome: basePaycheck * Double(futurePaydays.count),
             paydaysBeforeDate: futurePaydays.count,
-            goalReserve: goalReserve
+            goalReserve: goalReserve,
+            checkingBuffer: max(schedule?.checkingBuffer ?? 500, 0)
         )
     }
 
@@ -195,7 +221,7 @@ struct FinanceEngine {
 
     private func breakdown(for period: PayPeriod, expectedIncome: Double, goalPaychecks: Double) -> BudgetBreakdown {
         let paydays = payCycle.paydays(from: period.start, to: period.end)
-        let inPeriod = transactions.filter { period.contains($0.date) }
+        let inPeriod = includedTransactions.filter { period.contains($0.date) }
 
         func lines(_ kind: RecurringKind) -> [BudgetLine] {
             recurring.filter { $0.kind == kind && $0.isActive && !$0.needsReview }.compactMap { item in
@@ -239,7 +265,7 @@ struct FinanceEngine {
     /// Everyday spending (not bills, subscriptions, or Pay Yourself First) since `start`.
     func discretionarySpent(since start: Date) -> Double {
         let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
-        return transactions
+        return includedTransactions
             .filter { $0.date >= start && $0.date < end && $0.recurringItem == nil }
             .reduce(0) { $0 + $1.spendingAmount }
     }
@@ -261,7 +287,7 @@ struct FinanceEngine {
     /// Spending per group since `start`, with budgets scaled to the window length.
     func groupSpending(since start: Date, until date: Date) -> [GroupSpend] {
         let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
-        let inWindow = transactions.filter { $0.date >= start && $0.date < end && $0.spendingAmount != 0 }
+        let inWindow = includedTransactions.filter { $0.date >= start && $0.date < end && $0.spendingAmount != 0 }
         let windowDays = Double(max(calendar.dateComponents([.day], from: start, to: date).day ?? 14, 1))
         // Group budgets are monthly; scale them to the window being shown.
         let periodDays = Double(budgetMonth().dayCount)
@@ -286,13 +312,13 @@ struct FinanceEngine {
 
     /// Transactions Budgy wasn't sure how to group.
     var unsortedTransactions: [Transaction] {
-        transactions.filter { $0.needsCategoryReview && $0.kind == .expense }.sorted { $0.date > $1.date }
+        includedTransactions.filter { $0.needsCategoryReview && $0.kind == .expense }.sorted { $0.date > $1.date }
     }
 
     // MARK: Spending queries (also used by the Advisor)
 
     func spending(from start: Date, to end: Date) -> [(category: String, amount: Double)] {
-        let inRange = transactions.filter { $0.date >= start && $0.date < end && $0.spendingAmount != 0 }
+        let inRange = includedTransactions.filter { $0.date >= start && $0.date < end && $0.spendingAmount != 0 }
         let grouped = Dictionary(grouping: inRange) { $0.category?.name ?? ($0.recurringItem?.kind.displayName ?? "Uncategorized") }
         return grouped.map { ($0.key, $0.value.reduce(0) { $0 + $1.spendingAmount }) }
             .sorted { $0.amount > $1.amount }
@@ -300,13 +326,13 @@ struct FinanceEngine {
 
     // MARK: Accounts & retirement
 
-    var netWorth: Double { accounts.filter { !$0.isHidden }.reduce(0) { $0 + $1.signedBalance } }
+    var netWorth: Double { includedAccounts.reduce(0) { $0 + $1.signedBalance } }
 
     /// Roth IRA contributions this calendar year, from Pay Yourself First transfers into Roth accounts.
     var rothContributionsThisYear: Double {
-        let rothIDs = Set(accounts.filter { $0.kind == .rothIRA }.map(\.id))
+        let rothIDs = Set(includedAccounts.filter { $0.kind == .rothIRA }.map(\.id))
         let year = calendar.component(.year, from: now)
-        return transactions
+        return includedTransactions
             .filter { $0.kind == .contribution && calendar.component(.year, from: $0.date) == year }
             .filter { txn in
                 guard let destination = txn.recurringItem?.destinationAccountID else { return rothIDs.isEmpty == false }
@@ -317,7 +343,7 @@ struct FinanceEngine {
 
     /// Projected Roth contributions by Dec 31 at the current Pay Yourself First pace.
     var rothProjectedThisYear: Double {
-        let rothIDs = Set(accounts.filter { $0.kind == .rothIRA }.map(\.id))
+        let rothIDs = Set(includedAccounts.filter { $0.kind == .rothIRA }.map(\.id))
         guard let endOfYear = calendar.dateInterval(of: .year, for: now)?.end else { return rothContributionsThisYear }
         let remaining = recurring
             .filter { $0.kind == .payYourselfFirst && ($0.destinationAccountID.map(rothIDs.contains) ?? false) }

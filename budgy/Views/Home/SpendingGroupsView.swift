@@ -18,29 +18,31 @@ struct SpendingGroupsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                SectionHeader(title: "Spending Groups", trailing: "since \(windowStart.formatted(.dateTime.month(.abbreviated).day()))")
+            HStack(alignment: .firstTextBaseline) {
+                SectionHeader(title: "Spending", trailing: "since \(windowStart.formatted(.dateTime.month(.abbreviated).day()))")
                 Button("Add Group", systemImage: "plus") { showNewGroup = true }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.glass)
                     .buttonBorderShape(.circle)
-                    .padding(.top, 8)
+                    .controlSize(.small)
             }
 
             if unsortedCount > 0 {
                 Button {
                     navigation.selectedTab = .sort
                 } label: {
-                    HStack {
-                        Label("\(unsortedCount) transaction\(unsortedCount == 1 ? "" : "s") to sort", systemImage: "rectangle.stack.fill")
-                            .font(.subheadline.weight(.medium))
+                    HStack(spacing: 12) {
+                        IconBadge(systemImage: "square.stack.fill", color: .caution, size: 32)
+                        Text("\(unsortedCount) transaction\(unsortedCount == 1 ? "" : "s") to sort")
+                            .font(.subheadline.weight(.semibold))
                         Spacer()
-                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
                     }
-                    .foregroundStyle(.orange)
                     .card(padding: 12)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
                 .accessibilityHint("Opens the Sort tab")
             }
 
@@ -58,7 +60,7 @@ struct SpendingGroupsSection: View {
                             Button("Delete Group", systemImage: "trash", role: .destructive) { deleting = category }
                         }
                         if group.id != rows.last?.id {
-                            Divider().padding(.leading, 40)
+                            Divider().overlay(Color.hairline).padding(.leading, 46)
                         }
                     }
                 }
@@ -83,8 +85,8 @@ private struct GroupRow: View {
     var body: some View {
         let color = BudgyColor.named(group.colorName)
         HStack(spacing: 12) {
-            IconBadge(systemImage: group.systemImage, color: color, size: 28)
-            VStack(alignment: .leading, spacing: 6) {
+            IconBadge(systemImage: group.systemImage, color: color, size: 34)
+            VStack(alignment: .leading, spacing: 7) {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(group.name)
                         .font(.subheadline.weight(.medium))
@@ -93,23 +95,23 @@ private struct GroupRow: View {
                     Text(group.spent.currencyWhole)
                         .font(.subheadline.weight(.semibold))
                         .monospacedDigit()
-                        .foregroundStyle(group.budget > 0 && group.spent > group.budget ? .red : .primary)
+                        .foregroundStyle(group.budget > 0 && group.spent > group.budget ? .negative : .primary)
                     if group.budget > 0 {
-                        Text("/ \(group.budget.currencyWhole)")
+                        Text("of \(group.budget.currencyWhole)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .monospacedDigit()
                     }
                 }
                 if group.budget > 0 {
-                    BudgetBar(spent: group.spent, budget: group.budget, color: color, height: 6)
+                    BudgetBar(spent: group.spent, budget: group.budget, color: color, height: 5)
                 } else {
                     // No budget: show this group's share of spending instead.
-                    BudgetBar(spent: group.spent, budget: largestSpend, color: color.opacity(0.7), height: 6)
+                    ProgressBar(value: group.spent / largestSpend, color: color.opacity(0.7), height: 5)
                 }
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 9)
         .contentShape(.rect)
     }
 }
@@ -141,7 +143,7 @@ struct InvestmentGroupsSection: View {
                         }
                         .buttonStyle(.plain)
                         if account.id != accounts.last?.id {
-                            Divider().padding(.leading, 40)
+                            Divider().overlay(Color.hairline).padding(.leading, 46)
                         }
                     }
                 }
@@ -166,7 +168,7 @@ private struct InvestmentRow: View {
     var body: some View {
         let color = BudgyColor.forAccount(account.kind)
         HStack(spacing: 12) {
-            IconBadge(systemImage: account.kind.systemImage, color: color, size: 28)
+            IconBadge(systemImage: account.kind.systemImage, color: color, size: 34)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 1) {
@@ -185,19 +187,19 @@ private struct InvestmentRow: View {
                         if let change {
                             Text("\(change.amount >= 0 ? "+" : "−")\(abs(change.amount).currencyWhole) since \(change.since.formatted(.dateTime.month(.abbreviated)))")
                                 .font(.caption)
-                                .foregroundStyle(change.amount >= 0 ? .green : .red)
+                                .foregroundStyle(change.amount >= 0 ? .positive : .negative)
                         }
                     }
                 }
                 if let rothYTD {
-                    BudgetBar(spent: rothYTD, budget: rothLimit, color: color, height: 6)
+                    ProgressBar(value: rothLimit > 0 ? rothYTD / rothLimit : 0, color: color, height: 5)
                     Text("\(rothYTD.currencyWhole) of \(rothLimit.currencyWhole) contributed this year")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 9)
         .contentShape(.rect)
     }
 }
@@ -240,34 +242,38 @@ struct GroupDetailView: View {
 
     var body: some View {
         List {
-            Section {
-                HStack(spacing: 14) {
-                    IconBadge(systemImage: category.systemImage, color: BudgyColor.named(category.colorName), size: 48)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(category.monthlyBudget > 0 ? "\(category.monthlyBudget.currencyWhole) per month" : "No budget")
-                            .font(.headline)
-                        Text("\(transactions.count) transaction\(transactions.count == 1 ? "" : "s")")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+            Group {
+                Section {
+                    HStack(spacing: 14) {
+                        IconBadge(systemImage: category.systemImage, color: BudgyColor.named(category.colorName), size: 48)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(category.monthlyBudget > 0 ? "\(category.monthlyBudget.currencyWhole) per month" : "No budget")
+                                .font(.headline)
+                            Text("\(transactions.count) transaction\(transactions.count == 1 ? "" : "s")")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    if category.systemRole == CategoryRole.subscriptions || category.systemRole == CategoryRole.bills {
+                        NavigationLink("Manage Bills & Subscriptions") { SubscriptionsView(embedded: true) }
                     }
                 }
-                if category.systemRole == CategoryRole.subscriptions || category.systemRole == CategoryRole.bills {
-                    NavigationLink("Manage Bills & Subscriptions") { SubscriptionsView(embedded: true) }
-                }
-            }
-            Section("Transactions") {
-                if transactions.isEmpty {
-                    Text("Nothing here yet.").foregroundStyle(.secondary)
-                }
-                ForEach(transactions.prefix(100)) { transaction in
-                    NavigationLink {
-                        TransactionEditor(transaction: transaction)
-                    } label: {
-                        TransactionRow(transaction: transaction)
+                Section("Transactions") {
+                    if transactions.isEmpty {
+                        Text("Nothing here yet.").foregroundStyle(.secondary)
+                    }
+                    ForEach(transactions.prefix(100)) { transaction in
+                        NavigationLink {
+                            TransactionEditor(transaction: transaction)
+                        } label: {
+                            TransactionRow(transaction: transaction)
+                        }
                     }
                 }
             }
+            .budgyRows()
         }
+        .budgyList()
         .navigationTitle(category.name)
         .toolbar { Button("Edit") { showEdit = true } }
         .sheet(isPresented: $showEdit, onDismiss: {

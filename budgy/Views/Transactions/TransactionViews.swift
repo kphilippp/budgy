@@ -6,15 +6,15 @@ struct TransactionRow: View {
 
     private var icon: (String, Color) {
         switch transaction.kind {
-        case .income: ("arrow.down.circle.fill", .green)
-        case .contribution: ("leaf.fill", .mint)
-        case .transfer: ("arrow.left.arrow.right", .gray)
-        case .creditCardPayment: ("creditcard.fill", .blue)
-        case .refund: ("arrow.uturn.backward", .teal)
+        case .income: ("arrow.down.circle.fill", .moss)
+        case .contribution: ("leaf.fill", .sage)
+        case .transfer: ("arrow.left.arrow.right", .stone)
+        case .creditCardPayment: ("creditcard.fill", .lake)
+        case .refund: ("arrow.uturn.backward", .eucalyptus)
         case .expense:
-            if let item = transaction.recurringItem { (item.systemImage, .orange) }
+            if let item = transaction.recurringItem { (item.systemImage, .ochre) }
             else if let category = transaction.category { (category.systemImage, BudgyColor.named(category.colorName)) }
-            else { ("questionmark", .gray) }
+            else { ("questionmark", .stone) }
         }
     }
 
@@ -46,7 +46,7 @@ struct TransactionRow: View {
             VStack(alignment: .trailing, spacing: 2) {
                 Text(transaction.amount < 0 ? "+\(abs(transaction.amount).currency)" : transaction.amount.currency)
                     .font(.subheadline.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(transaction.amount < 0 ? .green : .primary)
+                    .foregroundStyle(transaction.amount < 0 ? .moss : .primary)
                 Text(transaction.date.formatted(.dateTime.month(.abbreviated).day()))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -76,18 +76,22 @@ struct TransactionListView: View {
 
     var body: some View {
         List {
-            ForEach(grouped, id: \.day) { group in
-                Section(group.day.formatted(.dateTime.weekday(.wide).month().day())) {
-                    ForEach(group.items) { transaction in
-                        NavigationLink {
-                            TransactionEditor(transaction: transaction)
-                        } label: {
-                            TransactionRow(transaction: transaction)
+            Group {
+                ForEach(grouped, id: \.day) { group in
+                    Section(group.day.formatted(.dateTime.weekday(.wide).month().day())) {
+                        ForEach(group.items) { transaction in
+                            NavigationLink {
+                                TransactionEditor(transaction: transaction)
+                            } label: {
+                                TransactionRow(transaction: transaction)
+                            }
                         }
                     }
                 }
             }
+            .budgyRows()
         }
+        .budgyList()
         .overlay {
             if filtered.isEmpty {
                 ContentUnavailableView.search(text: searchText)
@@ -145,58 +149,62 @@ struct TransactionEditor: View {
 
     private var form: some View {
         Form {
-            Section {
-                TextField("Merchant or description", text: $name)
-                    .font(.title3.weight(.medium))
-                HStack {
-                    Text("$").foregroundStyle(.secondary)
-                    TextField("0.00", text: $amountText)
-                        .keyboardType(.decimalPad)
-                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
+            Group {
+                Section {
+                    TextField("Merchant or description", text: $name)
+                        .font(.title3.weight(.medium))
+                    HStack {
+                        Text("$").foregroundStyle(.secondary)
+                        TextField("0.00", text: $amountText)
+                            .keyboardType(.decimalPad)
+                            .font(.system(.largeTitle, design: .serif))
+                    }
                 }
-            }
 
-            Section {
-                Picker("Type", selection: $kind) {
-                    ForEach(TransactionKind.allCases) { Text($0.displayName).tag($0) }
+                Section {
+                    Picker("Type", selection: $kind) {
+                        ForEach(TransactionKind.allCases) { Text($0.displayName).tag($0) }
+                    }
+                    if kind == .expense || kind == .refund {
+                        Picker("Group", selection: $categoryID) {
+                            Text("Unsorted").tag(UUID?.none)
+                            ForEach(categories) { category in
+                                Label(category.name, systemImage: category.systemImage).tag(Optional(category.id))
+                            }
+                        }
+                    }
+                    Picker("Account", selection: $accountID) {
+                        Text("None").tag(UUID?.none)
+                        ForEach(accounts) { account in
+                            Text(account.name).tag(Optional(account.id))
+                        }
+                    }
+                    DatePicker("Date", selection: $date, displayedComponents: .date)
                 }
-                if kind == .expense || kind == .refund {
-                    Picker("Group", selection: $categoryID) {
-                        Text("Unsorted").tag(UUID?.none)
-                        ForEach(categories) { category in
-                            Label(category.name, systemImage: category.systemImage).tag(Optional(category.id))
+
+                if !isNew, kind == .expense, !name.isEmpty {
+                    Section {
+                        Toggle("Always categorize \(name) this way", isOn: $rememberCategory)
+                    }
+                }
+
+                Section("Notes") {
+                    TextField("Optional", text: $notes, axis: .vertical)
+                }
+
+                if let transaction, !transaction.isLinkedToPlaid {
+                    Section {
+                        Button("Delete Transaction", role: .destructive) {
+                            context.delete(transaction)
+                            try? context.save()
+                            dismiss()
                         }
                     }
                 }
-                Picker("Account", selection: $accountID) {
-                    Text("None").tag(UUID?.none)
-                    ForEach(accounts) { account in
-                        Text(account.name).tag(Optional(account.id))
-                    }
-                }
-                DatePicker("Date", selection: $date, displayedComponents: .date)
             }
-
-            if !isNew, kind == .expense, !name.isEmpty {
-                Section {
-                    Toggle("Always categorize \(name) this way", isOn: $rememberCategory)
-                }
-            }
-
-            Section("Notes") {
-                TextField("Optional", text: $notes, axis: .vertical)
-            }
-
-            if let transaction, !transaction.isLinkedToPlaid {
-                Section {
-                    Button("Delete Transaction", role: .destructive) {
-                        context.delete(transaction)
-                        try? context.save()
-                        dismiss()
-                    }
-                }
-            }
+            .budgyRows()
         }
+        .budgyList()
         .navigationTitle(isNew ? "New Transaction" : "Edit Transaction")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

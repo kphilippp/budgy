@@ -8,23 +8,30 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                AccountSection()
-                Section {
-                    NavigationLink { PayScheduleSettings() } label: {
-                        Label("Paycheck", systemImage: "dollarsign.circle.fill")
+                Group {
+                    AccountSection()
+                    Section {
+                        NavigationLink { SavingsEducationScreen() } label: {
+                            Label("How Budgy Helps You Save", systemImage: "chart.pie.fill")
+                        }
+                        NavigationLink { PayScheduleSettings() } label: {
+                            Label("Paycheck", systemImage: "dollarsign.circle.fill")
+                        }
+                        NavigationLink { BankConnectionsView() } label: {
+                            Label("Bank Connections", systemImage: "link.circle.fill")
+                        }
                     }
-                    NavigationLink { BankConnectionsView() } label: {
-                        Label("Bank Connections", systemImage: "link.circle.fill")
+                    PreferencesSection()
+                    DataSection()
+                    Section {
+                        LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
+                    } footer: {
+                        Text("Budgy keeps your data on this iPhone. Bank data passes through your own relay server; the Advisor runs on Apple's on-device model.")
                     }
                 }
-                PreferencesSection()
-                DataSection()
-                Section {
-                    LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
-                } footer: {
-                    Text("Budgy keeps your data on this iPhone. Bank data passes through your own relay server; the Advisor runs on Apple's on-device model.")
-                }
+                .budgyRows()
             }
+            .budgyList()
             .navigationTitle("Settings")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done", systemImage: "checkmark") { dismiss() } }
@@ -42,20 +49,24 @@ private struct PayScheduleSettings: View {
     var body: some View {
         EngineReader { engine in
             Form {
-                if let schedule = schedules.first {
-                    PayScheduleForm(schedule: schedule, engine: engine)
-                } else {
-                    Section {
-                        Button("Set Up My Paycheck") {
-                            let schedule = PaySchedule(employerName: "Paycheck", frequency: .biweekly, anchorPayDate: .now, estimatedAmount: 2_000)
-                            context.insert(schedule)
-                            try? context.save()
+                Group {
+                    if let schedule = schedules.first {
+                        PayScheduleForm(schedule: schedule, engine: engine)
+                    } else {
+                        Section {
+                            Button("Set Up My Paycheck") {
+                                let schedule = PaySchedule(employerName: "Paycheck", frequency: .biweekly, anchorPayDate: .now, estimatedAmount: 2_000)
+                                context.insert(schedule)
+                                try? context.save()
+                            }
+                        } footer: {
+                            Text("Once your bank is connected, Budgy detects your paychecks automatically.")
                         }
-                    } footer: {
-                        Text("Once your bank is connected, Budgy detects your paychecks automatically.")
                     }
                 }
+                .budgyRows()
             }
+            .budgyList()
         }
         .navigationTitle("Paycheck")
     }
@@ -92,23 +103,19 @@ private struct PayScheduleForm: View {
 
         Section {
             LabeledContent("Typical check") {
-                TextField("Amount", value: $schedule.estimatedAmount, format: .currency(code: "USD"))
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
+                CurrencyField("Amount", value: $schedule.estimatedAmount)
             }
             Toggle("Set base amount manually", isOn: $useOverride.animation())
             if useOverride {
                 LabeledContent("Base paycheck") {
-                    TextField("Amount", value: $schedule.baseAmountOverride, format: .currency(code: "USD"))
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
+                    CurrencyField("Amount", value: $schedule.baseAmountOverride)
                 }
             }
             LabeledContent("Budgy budgets on", value: engine.basePaycheck.currency)
         } header: {
             Text("Base Paycheck")
         } footer: {
-            Text("Because overtime varies, Budgy budgets on a conservative base: the lower end of your last 6 paychecks. Anything above it shows up as extra pay you can send to a goal.")
+            Text("Budgy starts with the amount you provide. If a lower paycheck arrives, that becomes your new base; anything above the base is extra pay you can send to a goal.")
         }
 
         Section {
@@ -131,9 +138,7 @@ private struct PayScheduleForm: View {
             Toggle("Set monthly income manually", isOn: $useIncomeOverride.animation())
             if useIncomeOverride {
                 LabeledContent("Monthly income") {
-                    TextField("Amount", value: $schedule.monthlyIncomeOverride, format: .currency(code: "USD"))
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
+                    CurrencyField("Amount", value: $schedule.monthlyIncomeOverride)
                 }
             }
             LabeledContent("Budgy budgets on", value: engine.monthlyIncome.currency)
@@ -144,6 +149,16 @@ private struct PayScheduleForm: View {
         }
         .onAppear { useIncomeOverride = schedule.monthlyIncomeOverride > 0 }
         .onChange(of: useIncomeOverride) { _, on in if !on { schedule.monthlyIncomeOverride = 0 } }
+
+        Section {
+            LabeledContent("Protected checking buffer") {
+                CurrencyField("Buffer", value: $schedule.checkingBuffer)
+            }
+        } header: {
+            Text("Safe to Spend")
+        } footer: {
+            Text("Budgy leaves this amount untouched in checking before showing money as safe to spend.")
+        }
 
         Section {
             TextField("e.g. acme payroll", text: $schedule.matchText)
@@ -164,7 +179,7 @@ private struct PayScheduleForm: View {
                         if extra > 25 {
                             Text("+\(extra.currencyWhole)")
                                 .font(.caption.weight(.semibold))
-                                .foregroundStyle(.green)
+                                .foregroundStyle(.moss)
                         }
                     }
                 }
@@ -189,107 +204,111 @@ struct BankConnectionsView: View {
 
     var body: some View {
         Form {
-            Section {
-                if demoBankEnabled {
-                    Button("Disconnect Demo Bank", systemImage: "xmark.circle", role: .destructive) {
-                        sync.disconnectDemoBank(context: context)
-                        status = "Demo Bank disconnected."
-                    }
-                } else {
-                    Button {
-                        Task {
-                            isWorking = true
-                            status = "Connecting to Demo Bank…"
-                            await sync.connectDemoBank(context: context)
-                            isWorking = false
-                            status = sync.lastError.map { "❌ \($0)" } ?? "✅ Connected Wells Fargo, Capital One, and Charles Schwab (demo). Review recurring charges in Budget → Bills & Subscriptions, and sort the rest in the Sort tab."
-                        }
-                    } label: {
-                        Label("Connect Demo Bank", systemImage: "testtube.2")
-                    }
-                    .disabled(isWorking)
-                }
-            } header: {
-                Text("Testing")
-            } footer: {
-                Text("Pretends you linked a checking, savings, and credit card account plus Schwab retirement accounts, with 4 months of paychecks, bills, and subscriptions. Uses the same sync, categorizing, and subscription detection as a real bank. Replaces the sample data.")
-            }
-
-            Section {
-                TextField("https://budgy-relay.you.workers.dev", text: $serverURL)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                SecureField("App token", text: $appToken)
-                    .onChange(of: appToken) { _, value in Keychain.save(value, for: SettingsKeys.appToken) }
-                Button("Test Connection") { Task { await test() } }
-                    .disabled(serverURL.isEmpty || appToken.isEmpty || isWorking)
-            } header: {
-                Text("Relay Server")
-            } footer: {
-                Text("Your Plaid keys live on your own Cloudflare Worker. See Server/README.md in the project for the 10-minute setup.")
-            }
-
-            Section {
-                Button {
-                    Task { await connect(investments: false) }
-                } label: {
-                    Label("Connect a Bank or Card", systemImage: "building.columns")
-                }
-                Button {
-                    Task { await connect(investments: true) }
-                } label: {
-                    Label("Connect Schwab / Investments", systemImage: "chart.line.uptrend.xyaxis")
-                }
-            } footer: {
-                Text("Each connected login is one Plaid \"item\" (about $0.30–0.60/month in production, free on the Trial plan).")
-            }
-            .disabled(PlaidService.configured == nil || isWorking || demoBankEnabled)
-
-            if let status {
-                Section { Text(status).font(.subheadline) }
-            }
-
-            if !items.isEmpty {
+            Group {
                 Section {
-                    ForEach(items) { item in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.institutionName).font(.headline)
-                            if !item.lastError.isEmpty {
-                                Text(item.lastError).font(.caption).foregroundStyle(.red)
-                            } else if let synced = item.lastSynced {
-                                Text("Synced \(synced.formatted(.relative(presentation: .named)))").font(.caption).foregroundStyle(.secondary)
-                            } else {
-                                Text(item.isInvestments ? "Investments" : "Waiting for first sync").font(.caption).foregroundStyle(.secondary)
-                            }
+                    if demoBankEnabled {
+                        Button("Disconnect Demo Bank", systemImage: "xmark.circle", role: .destructive) {
+                            sync.disconnectDemoBank(context: context)
+                            status = "Demo Bank disconnected."
                         }
-                        .swipeActions {
-                            Button("Disconnect", role: .destructive) {
-                                Task { await sync.disconnect(item, context: context) }
+                    } else {
+                        Button {
+                            Task {
+                                isWorking = true
+                                status = "Connecting to Demo Bank…"
+                                await sync.connectDemoBank(context: context)
+                                isWorking = false
+                                status = sync.lastError.map { "❌ \($0)" } ?? "✅ Connected Wells Fargo, Capital One, and Charles Schwab (demo). Review recurring charges in Budget → Bills & Subscriptions, and sort the rest in the Sort tab."
                             }
+                        } label: {
+                            Label("Connect Demo Bank", systemImage: "testtube.2")
                         }
+                        .disabled(isWorking)
+                    }
+                } header: {
+                    Text("Testing")
+                } footer: {
+                    Text("Pretends you linked a checking, savings, and credit card account plus Schwab retirement accounts, with 4 months of paychecks, bills, and subscriptions. Uses the same sync, categorizing, and subscription detection as a real bank. Replaces the sample data.")
+                }
+
+                Section {
+                    TextField("https://budgy-relay.you.workers.dev", text: $serverURL)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("App token", text: $appToken)
+                        .onChange(of: appToken) { _, value in Keychain.save(value, for: SettingsKeys.appToken) }
+                    Button("Test Connection") { Task { await test() } }
+                        .disabled(serverURL.isEmpty || appToken.isEmpty || isWorking)
+                } header: {
+                    Text("Relay Server")
+                } footer: {
+                    Text("Your Plaid keys live on your own Cloudflare Worker. See Server/README.md in the project for the 10-minute setup.")
+                }
+
+                Section {
+                    Button {
+                        Task { await connect(investments: false) }
+                    } label: {
+                        Label("Connect a Bank or Card", systemImage: "building.columns")
                     }
                     Button {
-                        Task { await sync.sync(context: context) }
+                        Task { await connect(investments: true) }
                     } label: {
-                        if sync.isSyncing {
-                            HStack { ProgressView(); Text("Syncing…") }
-                        } else {
-                            Label("Sync Now", systemImage: "arrow.clockwise")
-                        }
+                        Label("Connect Schwab / Investments", systemImage: "chart.line.uptrend.xyaxis")
                     }
-                    .disabled(sync.isSyncing)
-                } header: {
-                    Text("Connected")
                 } footer: {
-                    if let error = sync.lastError {
-                        Text(error).foregroundStyle(.red)
-                    } else if let last = sync.lastSynced {
-                        Text("Last synced \(last.formatted(.relative(presentation: .named))). Swipe to disconnect, which also stops Plaid billing for it.")
+                    Text("Each connected login is one Plaid \"item\" (about $0.30–0.60/month in production, free on the Trial plan).")
+                }
+                .disabled(PlaidService.configured == nil || isWorking || demoBankEnabled)
+
+                if let status {
+                    Section { Text(status).font(.subheadline) }
+                }
+
+                if !items.isEmpty {
+                    Section {
+                        ForEach(items) { item in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.institutionName).font(.headline)
+                                if !item.lastError.isEmpty {
+                                    Text(item.lastError).font(.caption).foregroundStyle(.clay)
+                                } else if let synced = item.lastSynced {
+                                    Text("Synced \(synced.formatted(.relative(presentation: .named)))").font(.caption).foregroundStyle(.secondary)
+                                } else {
+                                    Text(item.isInvestments ? "Investments" : "Waiting for first sync").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            .swipeActions {
+                                Button("Disconnect", role: .destructive) {
+                                    Task { await sync.disconnect(item, context: context) }
+                                }
+                            }
+                        }
+                        Button {
+                            Task { await sync.sync(context: context) }
+                        } label: {
+                            if sync.isSyncing {
+                                HStack { ProgressView(); Text("Syncing…") }
+                            } else {
+                                Label("Sync Now", systemImage: "arrow.clockwise")
+                            }
+                        }
+                        .disabled(sync.isSyncing)
+                    } header: {
+                        Text("Connected")
+                    } footer: {
+                        if let error = sync.lastError {
+                            Text(error).foregroundStyle(.clay)
+                        } else if let last = sync.lastSynced {
+                            Text("Last synced \(last.formatted(.relative(presentation: .named))). Swipe to disconnect, which also stops Plaid billing for it.")
+                        }
                     }
                 }
             }
+            .budgyRows()
         }
+        .budgyList()
         .navigationTitle("Bank Connections")
     }
 
@@ -453,16 +472,17 @@ private struct AccountSection: View {
         Section {
             if let user = accounts.currentUser {
                 HStack(spacing: 14) {
+                    // The initial on a pebble of the user's own: same shape every time for the same name.
                     Text(String(user.firstName.prefix(1)).uppercased())
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 48, height: 48)
-                        .background(Circle().fill(.tint))
+                        .font(.display(.title2))
+                        .foregroundStyle(.tint)
+                        .frame(width: 52, height: 52)
+                        .background(Pebble(seed: user.email.stableHash).fill(.tint.opacity(0.16)))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(user.name).font(.headline)
                         Text(user.email).font(.subheadline).foregroundStyle(.secondary)
                         if user.isTestAccount {
-                            Text("Test account").font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                            Tag("Test account", color: .caution)
                         }
                     }
                 }

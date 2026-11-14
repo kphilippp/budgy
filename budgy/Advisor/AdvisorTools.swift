@@ -34,6 +34,20 @@ nonisolated struct FinanceContext: Sendable {
     var rothLimit: Double
     var monthlySubscriptions: Double
 
+    struct CardInfo: Sendable { var name: String; var balance: Double; var limit: Double; var payBeforeStatement: Double; var statementDate: Date?; var dueDate: Date? }
+    var cards: [CardInfo]
+    var cardsMissingLimit: Int
+    var overallUtilization: Double?
+    var paydownToTenPercent: Double
+    var interestPaid90Days: Double
+    var lateFees12Months: Double
+    var emergencyFundAmount: Double
+    var emergencyFundMonths: Double
+    var monthlySpending: Double
+    var savingsRate: Double
+    var nextStepTitle: String
+    var nextStepDetail: String
+
     func dateString(_ date: Date) -> String { date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) }
     func money(_ value: Double) -> String { value.formatted(.currency(code: "USD")) }
 
@@ -69,6 +83,10 @@ extension FinanceEngine {
             spending[key] = self.spending(from: start, to: end).map { .init(category: $0.category, amount: $0.amount) }
         }
 
+        let credit = self.credit
+        let fund = emergencyFund
+        let step = nextMoneyStep(rothLimit: rothLimit)
+
         return FinanceContext(
             today: today,
             safeToSpendUntilPayday: monthly.left,
@@ -96,8 +114,72 @@ extension FinanceEngine {
             rothYTD: rothContributionsThisYear,
             rothProjected: rothProjectedThisYear,
             rothLimit: rothLimit,
-            monthlySubscriptions: subscriptionsMonthlyTotal
+            monthlySubscriptions: subscriptionsMonthlyTotal,
+            cards: credit.cards.map {
+                .init(name: $0.name, balance: $0.balance, limit: $0.creditLimit, payBeforeStatement: $0.utilizationPaymentNeeded,
+                      statementDate: $0.nextStatementClosingDate(after: now), dueDate: $0.nextPaymentDueDate(after: now))
+            },
+            cardsMissingLimit: credit.cardsMissingLimit,
+            overallUtilization: credit.overallUtilization,
+            paydownToTenPercent: credit.paydownToTenPercent,
+            interestPaid90Days: credit.interestPaid90Days,
+            lateFees12Months: credit.lateFees12Months,
+            emergencyFundAmount: fund.amount,
+            emergencyFundMonths: fund.monthsCovered,
+            monthlySpending: fund.monthlySpending,
+            savingsRate: schedule?.savingsRate ?? 0,
+            nextStepTitle: step.title,
+            nextStepDetail: step.detail
         )
+    }
+}
+
+nonisolated struct CreditTool: Tool {
+    let finance: FinanceContext
+    let name = "getCreditHealth"
+    let description = "Gets credit card utilization (per card and overall), what to pay before each statement closes, due dates, interest paid, and late fees."
+
+    @Generable
+    struct Arguments {}
+
+    func call(arguments: Arguments) async throws -> String {
+        guard !finance.cards.isEmpty else {
+            return finance.cardsMissingLimit > 0 ? "Credit cards have no limits set, so utilization can't be calculated. Ask the user to add limits in Accounts." : "No credit cards."
+        }
+        var text = ""
+        if let overall = finance.overallUtilization {
+            text += "Overall utilization \(overall.formatted(.percent.precision(.fractionLength(0)))). Paying \(finance.money(finance.paydownToTenPercent)) before statements close would bring it under 10%. "
+        }
+        text += finance.cards.map { card in
+            var line = "\(card.name): \(finance.money(card.balance)) of \(finance.money(card.limit)) (\((card.limit > 0 ? card.balance / card.limit : 0).formatted(.percent.precision(.fractionLength(0)))))"
+            if card.payBeforeStatement > 0 {
+                line += ", pay \(finance.money(card.payBeforeStatement)) before the statement closes" + (card.statementDate.map { " on \(finance.dateString($0))" } ?? "") + " to report under 30%"
+            }
+            if let due = card.dueDate { line += ", full balance due \(finance.dateString(due))" }
+            return line
+        }.joined(separator: "; ")
+        if finance.interestPaid90Days > 0.5 { text += ". Interest paid in the last 90 days: \(finance.money(finance.interestPaid90Days))" }
+        if finance.lateFees12Months > 0 { text += ". Late fees in the last year: \(finance.money(finance.lateFees12Months))" }
+        return text + "."
+    }
+}
+
+nonisolated struct SavingsPlanTool: Tool {
+    let finance: FinanceContext
+    let name = "getSavingsPlan"
+    let description = "Gets the emergency fund (months of spending covered), the savings rate, and the recommended next step for spare money (cushion, card interest, emergency fund, Roth IRA, or investing)."
+
+    @Generable
+    struct Arguments {}
+
+    func call(arguments: Arguments) async throws -> String {
+        """
+        Emergency fund: \(finance.money(finance.emergencyFundAmount)), \(finance.emergencyFundMonths.formatted(.number.precision(.fractionLength(1)))) months of \
+        \(finance.money(finance.monthlySpending))/month spending (target 3 months, 6 if pay varies). \
+        Saving \(finance.savingsRate.formatted(.percent.precision(.fractionLength(0)))) of each base paycheck first. \
+        Recommended next step: \(finance.nextStepTitle). \(finance.nextStepDetail) \
+        Order used: starter cushion, stop card interest, 401(k) match if offered, 3-month emergency fund, Roth IRA, then invest more.
+        """
     }
 }
 

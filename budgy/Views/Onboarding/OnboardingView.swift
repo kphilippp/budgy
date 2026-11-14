@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 
-/// First-run setup: welcome → account → connect bank → budget month → preferences → done.
+/// First-run setup: welcome → account → connect bank → budget month → saving plan → preferences → done.
 /// A Testing menu in the bottom-right corner skips straight in.
 struct OnboardingView: View {
     @Environment(AccountStore.self) private var accounts
@@ -10,7 +10,7 @@ struct OnboardingView: View {
     @Environment(\.themeColor) private var themeColor
 
     enum Step: Int, CaseIterable {
-        case welcome, account, bank, budget, preferences, done
+        case welcome, account, bank, budget, savings, preferences, done
     }
 
     @State private var step: Step = .welcome
@@ -37,7 +37,9 @@ struct OnboardingView: View {
                     case .bank:
                         BankStep { advance(to: .budget) }
                     case .budget:
-                        BudgetMonthStep { advance(to: .preferences) }
+                        BudgetMonthStep { advance(to: .savings) }
+                    case .savings:
+                        SavingsPlanStep { advance(to: .preferences) }
                     case .preferences:
                         PreferencesStep { advance(to: .done) }
                     case .done:
@@ -56,7 +58,8 @@ struct OnboardingView: View {
             .padding(.trailing, 20)
             .padding(.bottom, 12)
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .budgyCanvas()
+        .dismissesKeyboardOnTap()
     }
 
     private var header: some View {
@@ -76,7 +79,7 @@ struct OnboardingView: View {
                         .frame(width: item == step ? 22 : 8, height: 8)
                 }
             }
-            .animation(.smooth, value: step)
+            .animation(Motion.standard, value: step)
             .accessibilityElement()
             .accessibilityLabel("Step \(step.rawValue) of \(Step.allCases.count - 1)")
             Spacer()
@@ -87,13 +90,13 @@ struct OnboardingView: View {
     }
 
     private func advance(to next: Step) {
-        withAnimation(.smooth) { step = next }
+        withAnimation(Motion.standard) { step = next }
     }
 
     private func finish() {
         SampleData.ensureDefaultCategories(context: context)
         SyncService.performHousekeeping(context: context)
-        withAnimation(.smooth) { accounts.completeOnboarding() }
+        withAnimation(Motion.gentle) { accounts.completeOnboarding() }
     }
 
     private func useTestAccount() async {
@@ -144,12 +147,10 @@ private struct StepLayout<Content: View, Footer: View>: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 40, weight: .semibold))
-                        .foregroundStyle(themeColor)
+                    IconBadge(systemImage: systemImage, color: themeColor, size: 64)
                         .padding(.top, 24)
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(title).font(.largeTitle.weight(.bold))
+                        Text(title).font(.display(.largeTitle))
                         Text(subtitle).font(.body).foregroundStyle(.secondary)
                     }
                     content
@@ -180,12 +181,14 @@ private struct PrimaryButton: View {
             .padding(.vertical, 6)
         }
         .buttonStyle(.glassProminent)
+        .foregroundStyle(.white)
         .controlSize(.large)
         .disabled(!isEnabled || isWorking)
     }
 }
 
 private struct WelcomeStep: View {
+    @Environment(\.themeColor) private var themeColor
     var onContinue: (AccountForm.Mode) -> Void
 
     var body: some View {
@@ -198,7 +201,7 @@ private struct WelcomeStep: View {
                 .shadow(color: .black.opacity(0.25), radius: 16, y: 8)
                 .accessibilityHidden(true)
             VStack(spacing: 10) {
-                Text("Budgy").font(.system(size: 44, weight: .bold, design: .rounded))
+                Text("Budgy").scaledFont(size: 52, weight: .semibold, design: .serif)
                 Text("Know exactly what you can spend,\nevery day of the month.")
                     .font(.title3)
                     .multilineTextAlignment(.center)
@@ -223,10 +226,12 @@ private struct WelcomeStep: View {
     }
 
     private func feature(_ systemImage: String, _ text: String) -> some View {
-        Label {
-            Text(text).font(.subheadline)
-        } icon: {
-            Image(systemName: systemImage).foregroundStyle(.tint).frame(width: 24)
+        HStack(spacing: 14) {
+            IconBadge(systemImage: systemImage, color: themeColor, size: 34)
+            Text(text)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -283,14 +288,13 @@ struct AccountForm: View {
                     .focused($focused, equals: .password)
                     .submitLabel(.go)
                     .onSubmit(submit)
-                    .padding(14)
-                    .background(.background.secondary, in: .rect(cornerRadius: 14))
+                    .fieldStyle()
             }
 
             if let errorMessage {
                 Label(errorMessage, systemImage: "exclamationmark.circle.fill")
                     .font(.subheadline)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.clay)
             }
 
             Text("Accounts are stored securely on this iPhone for now.")
@@ -305,8 +309,7 @@ struct AccountForm: View {
         TextField(title, text: text)
             .focused($focused, equals: field)
             .submitLabel(.next)
-            .padding(14)
-            .background(.background.secondary, in: .rect(cornerRadius: 14))
+            .fieldStyle()
     }
 
     private func submit() {
@@ -327,6 +330,7 @@ struct AccountForm: View {
 }
 
 private struct BankStep: View {
+    @Environment(\.themeColor) private var themeColor
     @Environment(SyncService.self) private var sync
     @Environment(\.modelContext) private var context
     @Query private var items: [PlaidItem]
@@ -358,7 +362,7 @@ private struct BankStep: View {
                     Text("Connected").font(.subheadline.weight(.semibold))
                     ForEach(items) { item in
                         Label(item.institutionName, systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
+                            .foregroundStyle(.moss)
                     }
                 }
                 .card(padding: 14)
@@ -383,10 +387,7 @@ private struct BankStep: View {
     private func option(_ title: String, detail: String, systemImage: String, isWorking: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 14) {
-                Image(systemName: systemImage)
-                    .font(.title3)
-                    .foregroundStyle(.tint)
-                    .frame(width: 32)
+                IconBadge(systemImage: systemImage, color: themeColor, size: 40)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.headline)
                     Text(detail).font(.caption).foregroundStyle(.secondary)
@@ -396,7 +397,7 @@ private struct BankStep: View {
             }
             .card(padding: 16)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .disabled(isWorking)
     }
 }
@@ -471,13 +472,11 @@ private struct BudgetMonthFields: View {
                 }
                 if engine.paychecks.count < 2 {
                     LabeledContent("Typical paycheck") {
-                        TextField("Amount", value: $schedule.estimatedAmount, format: .currency(code: "USD"))
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
+                        CurrencyField("Amount", value: $schedule.estimatedAmount)
                     }
                     DatePicker("A recent payday", selection: $schedule.anchorPayDate, displayedComponents: .date)
                 }
-                Divider()
+                Divider().overlay(Color.hairline)
                 LabeledContent("Monthly income", value: engine.monthlyIncome.currency)
                     .font(.headline)
                 Text("\(engine.paychecksPerMonth) × \(engine.basePaycheck.currency) base paycheck. You can change this anytime in Settings → Paycheck.")
@@ -485,6 +484,28 @@ private struct BudgetMonthFields: View {
                     .foregroundStyle(.secondary)
             }
             .card()
+        }
+    }
+}
+
+private struct SavingsPlanStep: View {
+    @Query private var schedules: [PaySchedule]
+    var onContinue: () -> Void
+
+    var body: some View {
+        StepLayout(
+            systemImage: "arrow.down.heart.fill",
+            title: "Save before you spend",
+            subtitle: "Budgy gives every base paycheck a job, protects the money you want to keep, and makes the remainder easy to understand."
+        ) {
+            if let schedule = schedules.first {
+                @Bindable var schedule = schedule
+                SavingsEducationDemo(savingsRate: $schedule.savingsRate, compact: true)
+            } else {
+                SavingsEducationDemo(compact: true)
+            }
+        } footer: {
+            PrimaryButton(title: "Use This Approach", action: onContinue)
         }
     }
 }
@@ -506,7 +527,7 @@ private struct PreferencesStep: View {
                     Label("Require Face ID", systemImage: "faceid")
                 }
                 .padding(.vertical, 10)
-                Divider()
+                Divider().overlay(Color.hairline)
                 Toggle(isOn: $notifications) {
                     Label("Bill & Payday Reminders", systemImage: "bell.badge.fill")
                 }
@@ -526,19 +547,18 @@ private struct PreferencesStep: View {
 }
 
 private struct DoneStep: View {
+    @Environment(\.themeColor) private var themeColor
     @Environment(AccountStore.self) private var accounts
     var onFinish: () -> Void
 
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
-            Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 72))
-                .foregroundStyle(.tint)
+            IconBadge(systemImage: "checkmark.seal.fill", color: themeColor, size: 96)
                 .symbolEffect(.bounce, options: .nonRepeating)
             VStack(spacing: 8) {
                 Text(accounts.currentUser.map { "You're all set, \($0.firstName)!" } ?? "You're all set!")
-                    .font(.largeTitle.weight(.bold))
+                    .font(.display(.largeTitle))
                     .multilineTextAlignment(.center)
                 Text("Budgy will keep your Safe to Spend up to date as you spend.")
                     .font(.body)

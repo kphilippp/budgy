@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct GoalsView: View {
+    @Environment(\.themeColor) private var themeColor
     @State private var showNewGoal = false
 
     var body: some View {
@@ -10,16 +11,25 @@ struct GoalsView: View {
                 let active = engine.goals.filter { !$0.isArchived }
                 ScrollView {
                     VStack(spacing: 16) {
+                        EmergencyFundCard(fund: engine.emergencyFund)
                         if active.isEmpty {
-                            ContentUnavailableView {
-                                Label("No goals yet", systemImage: "target")
-                            } description: {
-                                Text("Save up for a trip, an emergency fund, or anything else. Budgy earmarks money in your savings and tells you how much to set aside each paycheck.")
-                            } actions: {
+                            VStack(spacing: 14) {
+                                IconBadge(systemImage: "mountain.2.fill", color: themeColor, size: 84)
+                                Text("No goals yet")
+                                    .font(.display(.title2))
+                                Text("Save up for a trip, a laptop, or anything else. Budgy earmarks money in your savings and tells you how much to set aside each paycheck.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
                                 Button("Create a Goal") { showNewGoal = true }
                                     .buttonStyle(.glassProminent)
+                                    .foregroundStyle(.white)
+                                    .controlSize(.large)
+                                    .padding(.top, 6)
                             }
-                            .padding(.top, 60)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 48)
                         } else {
                             GoalsSummary(goals: active)
                             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
@@ -29,7 +39,7 @@ struct GoalsView: View {
                                     } label: {
                                         GoalTile(goal: goal, status: GoalStatus(goal: goal, engine: engine))
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(.pressable)
                                 }
                             }
                         }
@@ -37,7 +47,7 @@ struct GoalsView: View {
                     .padding(.horizontal)
                     .padding(.bottom, 24)
                 }
-                .background(Color(.systemGroupedBackground))
+                .budgyCanvas()
             }
             .navigationTitle("Goals")
             .toolbar {
@@ -48,6 +58,74 @@ struct GoalsView: View {
             .budgyToolbar()
             .sheet(isPresented: $showNewGoal) { GoalEditor(goal: nil) }
         }
+    }
+}
+
+/// Emergency savings measured in months of spending covered, with 3- and 6-month milestones.
+private struct EmergencyFundCard: View {
+    var fund: EmergencyFundStatus
+
+    private var months: Double { fund.monthsCovered }
+
+    private var status: String {
+        if fund.monthlySpending <= 0 { return "Budgy needs some spending history or bills to size this." }
+        if !fund.hasStarterCushion { return "Start with \(fund.starterTarget.currencyWhole) so a surprise bill doesn't go on a card." }
+        if months < EmergencyFundStatus.solidMonths { return "\((fund.solidTarget - fund.amount).currencyWhole) more reaches 3 months." }
+        if months < EmergencyFundStatus.fullMonths { return "Solid. \((fund.fullTarget - fund.amount).currencyWhole) more reaches 6 months, worth aiming for if your pay varies." }
+        return "Fully funded. Extra savings can go toward investing."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
+                IconBadge(systemImage: "shield.lefthalf.filled", color: .positive, size: 40)
+                Text("Emergency fund")
+                    .font(.headline)
+                Spacer()
+                Text("\(months.formatted(.number.precision(.fractionLength(1)))) mo")
+                    .font(.display(.title2).monospacedDigit())
+                    .foregroundStyle(months >= EmergencyFundStatus.solidMonths ? .positive : .primary)
+                    .contentTransition(.numericText(value: months))
+            }
+
+            GeometryReader { proxy in
+                let width = proxy.size.width
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.ink.opacity(0.07))
+                    Capsule()
+                        .fill(Color.positive)
+                        .frame(width: max(width * min(months / EmergencyFundStatus.fullMonths, 1), 6))
+                    // 3-month milestone tick.
+                    Rectangle()
+                        .fill(Color.surface)
+                        .frame(width: 2)
+                        .offset(x: width * EmergencyFundStatus.solidMonths / EmergencyFundStatus.fullMonths - 1)
+                }
+            }
+            .frame(height: 10)
+            .accessibilityHidden(true)
+
+            HStack {
+                Text("\(fund.amount.currencyWhole) saved")
+                Spacer()
+                Text("3 mo · 6 mo")
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+
+            Text(status)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(fund.spendingIsEstimated
+                 ? "Based on \(fund.monthlySpending.currencyWhole)/mo from your bills and budgets. Savings earmarked for other goals don't count."
+                 : "Based on \(fund.monthlySpending.currencyWhole)/mo, your average spending over the last 90 days. Savings earmarked for other goals don't count.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .card()
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -75,7 +153,7 @@ struct GoalStatus {
 
     var label: String {
         switch state {
-        case .complete: "Complete 🎉"
+        case .complete: "Complete"
         case .onTrack: "On track"
         case .behind: "Behind"
         case .noDeadline: projectedDate.map { "Done \($0.formatted(.dateTime.month(.abbreviated).year()))" } ?? "In progress"
@@ -85,8 +163,8 @@ struct GoalStatus {
 
     var color: Color {
         switch state {
-        case .complete, .onTrack: .green
-        case .behind: .orange
+        case .complete, .onTrack: .positive
+        case .behind: .caution
         case .noDeadline: .secondary
         case .noPlan: .secondary
         }
@@ -94,27 +172,28 @@ struct GoalStatus {
 }
 
 private struct GoalsSummary: View {
+    @Environment(\.themeColor) private var themeColor
     var goals: [Goal]
 
     var body: some View {
         let saved = goals.reduce(0) { $0 + $1.savedAmount }
         let target = goals.reduce(0) { $0 + $1.targetAmount }
         let perPaycheck = goals.reduce(0) { $0 + $1.contributionPerPaycheck }
-        HStack(spacing: 16) {
-            ProgressRing(progress: target > 0 ? saved / target : 0, color: .pink, lineWidth: 10)
-                .frame(width: 64, height: 64)
+        HStack(alignment: .center, spacing: 18) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(saved.currencyWhole) saved")
-                    .font(.title2.weight(.bold))
-                Text("of \(target.currencyWhole) across \(goals.count) goal\(goals.count == 1 ? "" : "s")")
-                    .font(.subheadline).foregroundStyle(.secondary)
-                Text("\(perPaycheck.currencyWhole) per paycheck")
-                    .font(.caption.weight(.medium)).foregroundStyle(.pink)
+                Text("Saved toward goals")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.secondary)
+                MoneyText(saved, size: 48)
+                Text("of \(target.currencyWhole) across \(goals.count) goal\(goals.count == 1 ? "" : "s") · \(perPaycheck.currencyWhole) per paycheck")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
-            Spacer()
+            Spacer(minLength: 0)
+            ProgressRing(progress: target > 0 ? saved / target : 0, color: themeColor, lineWidth: 5, seed: 41)
+                .frame(width: 76, height: 76)
         }
-        .padding(20)
-        .glassEffect(.regular.tint(.pink.opacity(0.1)), in: .rect(cornerRadius: 28))
+        .padding(.top, 4)
     }
 }
 
@@ -126,23 +205,21 @@ private struct GoalTile: View {
         let color = BudgyColor.named(goal.colorName)
         VStack(alignment: .leading, spacing: 12) {
             ZStack {
-                ProgressRing(progress: goal.progress, color: color, lineWidth: 9)
+                ProgressRing(progress: goal.progress, color: color, lineWidth: 4, seed: goal.systemImage.stableHash)
                 Image(systemName: goal.systemImage)
-                    .font(.title2.weight(.semibold))
+                    .font(.title3.weight(.medium))
                     .foregroundStyle(color)
             }
-            .frame(width: 72, height: 72)
+            .frame(width: 76, height: 76)
             .frame(maxWidth: .infinity)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(goal.name).font(.headline).lineLimit(1)
+                Text(goal.name).font(.display(.headline)).lineLimit(1)
                 Text("\(goal.savedAmount.currencyWhole) of \(goal.targetAmount.currencyWhole)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
-            Text(status.label)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(status.color)
+            Tag(status.label, color: status.color)
         }
         .card()
     }
@@ -168,30 +245,30 @@ struct GoalDetailView: View {
                 VStack(spacing: 16) {
                     VStack(spacing: 16) {
                         ZStack {
-                            ProgressRing(progress: goal.progress, color: color, lineWidth: 16)
+                            ProgressRing(progress: goal.progress, color: color, lineWidth: 7, seed: goal.systemImage.stableHash)
                             VStack(spacing: 2) {
                                 Text("\(Int(goal.progress * 100))%")
-                                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                                    .heroNumber(size: 46)
+                                    .contentTransition(.numericText(value: goal.progress))
                                 Text(goal.remaining.currencyWhole + " to go")
                                     .font(.subheadline).foregroundStyle(.secondary)
                             }
                         }
-                        .frame(width: 190, height: 190)
+                        .frame(width: 210, height: 210)
 
                         Text("\(goal.savedAmount.currency) of \(goal.targetAmount.currency)")
-                            .font(.headline.monospacedDigit())
+                            .font(.display(.headline).monospacedDigit())
 
                         HStack {
                             Button("Add Money", systemImage: "plus") { adjustment = .add }
                                 .buttonStyle(.glassProminent)
-                                .tint(color)
+                                .foregroundStyle(.white)
                             Button("Withdraw", systemImage: "minus") { adjustment = .withdraw }
                                 .buttonStyle(.glass)
                         }
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-                    .glassEffect(.regular.tint(color.opacity(0.1)), in: .rect(cornerRadius: 28))
+                    .padding(.vertical, 12)
 
                     VStack(alignment: .leading, spacing: 10) {
                         row("Per paycheck", goal.contributionPerPaycheck.currency)
@@ -215,7 +292,7 @@ struct GoalDetailView: View {
 
                     // What-if planner.
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("What if…").font(.headline)
+                        Text("What if…").font(.display(.title3))
                         Text("I put \(whatIf.currencyWhole) toward this each paycheck")
                             .font(.subheadline)
                         Slider(value: $whatIf, in: 0...max(500, goal.contributionPerPaycheck * 2), step: 5)
@@ -230,7 +307,7 @@ struct GoalDetailView: View {
                         }
                         if abs(whatIf - goal.contributionPerPaycheck) >= 1 {
                             Button("Use \(whatIf.currencyWhole) per paycheck") {
-                                withAnimation { goal.contributionPerPaycheck = whatIf }
+                                withAnimation(Motion.standard) { goal.contributionPerPaycheck = whatIf }
                                 try? context.save()
                                 SyncService.performHousekeeping(context: context)
                             }
@@ -242,10 +319,13 @@ struct GoalDetailView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 24)
             }
-            .background(Color(.systemGroupedBackground))
+            .budgyCanvas()
         }
         .navigationTitle(goal.name)
         .toolbar { Button("Edit") { showEdit = true } }
+        // Money added to a goal is a moment worth feeling; withdrawals stay quiet.
+        .sensoryFeedback(trigger: goal.savedAmount) { old, new in new > old ? .success : nil }
+        .animation(Motion.gentle, value: goal.savedAmount)
         .sheet(isPresented: $showEdit) { GoalEditor(goal: goal) }
         .sheet(item: $adjustment) { kind in
             GoalAdjustSheet(goal: goal, isWithdrawal: kind == .withdraw)
@@ -280,16 +360,20 @@ private struct GoalAdjustSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    TextField("Amount", value: $amount, format: .currency(code: "USD"))
-                        .keyboardType(.decimalPad)
-                        .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                } footer: {
-                    Text(isWithdrawal
-                         ? "Un-earmarks money from this goal. Nothing moves in your bank."
-                         : "Earmarks money already in your savings for this goal. Nothing moves in your bank.")
+                Group {
+                    Section {
+                        TextField("Amount", value: $amount, format: .currency(code: "USD"))
+                            .keyboardType(.decimalPad)
+                            .font(.system(.largeTitle, design: .serif))
+                    } footer: {
+                        Text(isWithdrawal
+                             ? "Un-earmarks money from this goal. Nothing moves in your bank."
+                             : "Earmarks money already in your savings for this goal. Nothing moves in your bank.")
+                    }
                 }
+                .budgyRows()
             }
+            .budgyList()
             .navigationTitle(isWithdrawal ? "Withdraw" : "Add to \(goal.name)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -343,50 +427,54 @@ struct GoalEditor: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    HStack {
-                        IconBadge(systemImage: systemImage, color: BudgyColor.named(colorName), size: 44)
-                        TextField("Goal name", text: $name).font(.title3)
-                    }
-                }
-                Section {
-                    currencyField("Target", $target)
-                    currencyField("Already saved", $saved)
-                    currencyField("Per paycheck", $perPaycheck)
-                }
-                Section {
-                    Toggle("Deadline", isOn: $hasDeadline.animation())
-                    if hasDeadline {
-                        DatePicker("Finish by", selection: $deadline, in: Date.now..., displayedComponents: .date)
-                    }
-                }
-                Section("Icon") {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
-                        ForEach(Self.icons, id: \.self) { icon in
-                            Button { systemImage = icon } label: {
-                                IconBadge(systemImage: icon, color: icon == systemImage ? BudgyColor.named(colorName) : .gray.opacity(0.5), size: 38)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(icon)
-                        }
-                    }
-                }
-                Section("Color") { ColorPickerRow(selection: $colorName) }
-                if let goal {
+                Group {
                     Section {
-                        Button(goal.isArchived ? "Unarchive" : "Archive Goal") {
-                            goal.isArchived.toggle()
-                            try? context.save()
-                            dismiss()
+                        HStack {
+                            IconBadge(systemImage: systemImage, color: BudgyColor.named(colorName), size: 44)
+                            TextField("Goal name", text: $name).font(.title3)
                         }
-                        Button("Delete Goal", role: .destructive) {
-                            context.delete(goal)
-                            try? context.save()
-                            dismiss()
+                    }
+                    Section {
+                        currencyField("Target", $target)
+                        currencyField("Already saved", $saved)
+                        currencyField("Per paycheck", $perPaycheck)
+                    }
+                    Section {
+                        Toggle("Deadline", isOn: $hasDeadline.animation())
+                        if hasDeadline {
+                            DatePicker("Finish by", selection: $deadline, in: Date.now..., displayedComponents: .date)
+                        }
+                    }
+                    Section("Icon") {
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 12) {
+                            ForEach(Self.icons, id: \.self) { icon in
+                                Button { systemImage = icon } label: {
+                                    IconBadge(systemImage: icon, color: icon == systemImage ? BudgyColor.named(colorName) : .stone.opacity(0.5), size: 38)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(icon)
+                            }
+                        }
+                    }
+                    Section("Color") { ColorPickerRow(selection: $colorName) }
+                    if let goal {
+                        Section {
+                            Button(goal.isArchived ? "Unarchive" : "Archive Goal") {
+                                goal.isArchived.toggle()
+                                try? context.save()
+                                dismiss()
+                            }
+                            Button("Delete Goal", role: .destructive) {
+                                context.delete(goal)
+                                try? context.save()
+                                dismiss()
+                            }
                         }
                     }
                 }
+                .budgyRows()
             }
+            .budgyList()
             .navigationTitle(goal == nil ? "New Goal" : "Edit Goal")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
